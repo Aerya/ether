@@ -2,10 +2,8 @@ package plex
 
 import (
 	"context"
-	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/braedonsaunders/ether/internal/frontend"
 	"github.com/braedonsaunders/ether/internal/frontends/plex/model"
@@ -112,23 +110,47 @@ func (s *Server) liveGuideFilters(ctx context.Context, u *frontend.User) []model
 	}
 	return append(out, liveCategoryGuideFilters()...)
 }
-func (s *Server) liveCategoryChannels(r *http.Request, cs []frontend.LiveTVChannel, category string) ([]frontend.LiveTVChannel, error) {
+func liveChannelGenreKeysFromProgrammes(ps []frontend.LiveTVProgramme) map[string]model.StringList {
+	filters := liveCategoryGuideFilters()
+	byChannel := make(map[string]map[string]bool)
+	for _, p := range ps {
+		for _, f := range filters {
+			canonical, ok := normalizeLiveCategory(f.Identifier)
+			if !ok {
+				continue
+			}
+			if matchesLiveCategory(p.Item.Genres, canonical, p.Item.MediaType) {
+				m := byChannel[p.ChannelID]
+				if m == nil {
+					m = make(map[string]bool)
+					byChannel[p.ChannelID] = m
+				}
+				m[f.GenreRatingKey] = true
+			}
+		}
+	}
+	out := make(map[string]model.StringList, len(byChannel))
+	for cid, m := range byChannel {
+		keys := make(model.StringList, 0, len(m))
+		for _, f := range filters {
+			if m[f.GenreRatingKey] {
+				keys = append(keys, f.GenreRatingKey)
+			}
+		}
+		if len(keys) > 0 {
+			out[cid] = keys
+		}
+	}
+	return out
+}
+
+func (s *Server) liveCategoryChannels(cs []frontend.LiveTVChannel, category string, ps []frontend.LiveTVProgramme) ([]frontend.LiveTVChannel, error) {
 	canonical, ok := normalizeLiveCategory(category)
 	if !ok {
 		return nil, frontend.ErrNotFound
 	}
-	ids := make([]string, 0, len(cs))
-	for _, c := range cs {
-		ids = append(ids, c.ID)
-	}
-	// A bounded window, no catalogue lookup and no provider/network refresh.
-	if len(ids) == 0 {
+	if len(cs) == 0 {
 		return cs, nil
-	}
-	now := time.Now()
-	ps, err := s.svc().liveTV.GuideForChannels(r.Context(), FromContext(r.Context()).User, now, now.Add(2*time.Hour), ids)
-	if err != nil {
-		return nil, err
 	}
 	matches := map[string]bool{}
 	for _, p := range ps {

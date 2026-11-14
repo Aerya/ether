@@ -27,14 +27,15 @@ import (
 const liveProviderPath = "/" + frontend.LiveTVProvider
 
 type liveChannel struct {
-	ID       string `plex:"id"`
-	GridKey  string `plex:"gridKey"`
-	VCN      string `plex:"vcn"`
-	IsHD     bool   `plex:"isHd"`
-	Thumb    string `plex:"thumb"`
-	Title    string `plex:"title"`
-	CallSign string `plex:"callSign"`
-	Language string `plex:"language"`
+	ID              string           `plex:"id"`
+	GridKey         string           `plex:"gridKey"`
+	VCN             string           `plex:"vcn"`
+	IsHD            bool             `plex:"isHd"`
+	Thumb           string           `plex:"thumb"`
+	Title           string           `plex:"title"`
+	CallSign        string           `plex:"callSign"`
+	Language        string           `plex:"language"`
+	GenreRatingKeys model.StringList `plex:"genreRatingKeys,omitempty"`
 }
 type liveMapping struct {
 	ChannelKey       string `plex:"channelKey"`
@@ -397,17 +398,32 @@ func (s *Server) handleLiveChannels(w http.ResponseWriter, r *http.Request) {
 	if category == "" {
 		category = strings.TrimSpace(r.URL.Query().Get("genre"))
 	}
+	var ps []frontend.LiveTVProgramme
+	if len(cs) > 0 {
+		ids := make([]string, 0, len(cs))
+		for _, c := range cs {
+			ids = append(ids, c.ID)
+		}
+		now := time.Now()
+		var gErr error
+		ps, gErr = s.svc().liveTV.GuideForChannels(r.Context(), FromContext(r.Context()).User, now, now.Add(2*time.Hour), ids)
+		if gErr != nil && category != "" {
+			s.writeErr(w, r, gErr)
+			return
+		}
+	}
 	if category != "" {
-		cs, err = s.liveCategoryChannels(r, cs, category)
+		cs, err = s.liveCategoryChannels(cs, category, ps)
 		if err != nil {
 			s.writeErr(w, r, err)
 			return
 		}
 	}
+	genreKeys := liveChannelGenreKeysFromProgrammes(ps)
 	out := []liveChannel{}
 	maps := []liveMapping{}
 	for _, c := range cs {
-		out = append(out, liveChannel{ID: c.ID, GridKey: c.ID, VCN: c.Number, Thumb: s.liveGuideLogo(r, c), Title: c.Name, CallSign: c.Name, Language: "eng"})
+		out = append(out, liveChannel{ID: c.ID, GridKey: c.ID, VCN: c.Number, Thumb: s.liveGuideLogo(r, c), Title: c.Name, CallSign: c.Name, Language: "eng", GenreRatingKeys: genreKeys[c.ID]})
 		maps = append(maps, liveMapping{c.ID, c.Number, "1", c.GuideID})
 	}
 	s.write(w, r, &liveContainer{Size: len(out), Identifier: frontend.LiveTVProvider, Channel: out, ChannelMapping: maps})
