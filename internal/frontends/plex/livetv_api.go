@@ -90,27 +90,33 @@ func (s *Server) liveTVProvider(ctx context.Context, u *frontend.User) *model.Me
 	return &model.MediaProvider{Extra: []model.Attr{model.A("id", 1), model.A("parentID", 1), model.A("providerIdentifier", "tv.plex.providers.epg.xmltv"), model.A("epgSource", "XMLTV")}, Identifier: frontend.LiveTVProvider, Title: "Live TV", Types: "video", Protocols: "livetv", Feature: []model.Feature{
 		{
 			Type: "content",
-			Key:  liveProviderPath,
-			// Plex Web needs the keyed "livetv" directory (id/key/hubKey/type)
-			// to list the server's Live TV & DVR source.
-			Directory: []model.ProviderDirectory{{
-				ID:      "livetv",
-				Key:     liveProviderPath + "/lineups/dvr/channels",
-				HubKey:  liveProviderPath + "/hubs",
-				Title:   "Live TV",
-				Type:    "livetv",
-				Context: "content.home",
-				Pivot: []model.Pivot{
-					{ID: "epg.whatson", Key: liveProviderPath + "/hubs/sections/home", Type: "hub", Title: "What's On", Context: "content.home", Symbol: "star"},
-					{ID: "epg.guide", Key: "view://dvr/guide", Type: "view", Title: "Guide", Context: "content.dvr.guide", Symbol: "guide"},
+			Key:  liveProviderPath + "/sections",
+			// Matches real Plex DVR /media/providers so both Plex Web and
+			// Android Mobile/TV show What's On + Guide pivots, Featured, and
+			// GridChannelFilter category pills instead of opening a flat channel list.
+			Directory: []model.ProviderDirectory{
+				{
+					ID:     frontend.LiveTVProvider,
+					HubKey: liveProviderPath + "/hubs/discover",
+					Title:  "Live TV & DVR",
+					Pivot: []model.Pivot{
+						{ID: "dvr.whatson", Key: liveProviderPath + "/hubs/discover", Type: "hub", Title: "What's On", Context: "content.dvr.discover", Symbol: "star"},
+						{ID: "dvr.guide", Key: "view://dvr/guide", Type: "view", Title: "Guide", Context: "content.dvr.guide", Symbol: "guide"},
+					},
 				},
-			}},
+				{
+					Icon:  "/:/resources/dvr/dvr-watchnow-icon.png",
+					Key:   liveProviderPath + "/watchnow",
+					Title: "Guide",
+					Type:  "mixed",
+				},
+			},
 		},
 		{Type: "universalsearch", Key: liveProviderPath + "/library/search"},
 		{Type: "grid", Key: liveProviderPath + "/grid", PromotedGridChannelFilter: []model.GridChannelFilter{{Identifier: "featured", Key: liveProviderPath + "/lineups/dvr/channels/featured", Title: "Featured"}}, GridChannelFilter: filters},
 		{Type: "metadata", Key: liveProviderPath + "/metadata"},
 		{Type: "livetv", Key: "/livetv/dvrs"},
-		{Type: "promoted", Key: liveProviderPath + "/hubs/promoted"},
+		{Type: "promoted", Key: liveProviderPath + "/hubs/discover?promoted=1&includeTypeFirst=1"},
 	}}
 }
 
@@ -159,6 +165,7 @@ func (s *Server) registerLiveTVRoutes(r chi.Router) {
 		get(path, s.handleLiveChannels)
 	}
 	get(liveProviderPath, s.handleLiveRoot)
+	get(liveProviderPath+"/sections", s.handleLiveRoot)
 	get(liveProviderPath+"/lineups/dvr/channels/featured", s.handleLiveChannels)
 	get(liveProviderPath+"/guides/{guide}/channels", s.handleLiveChannels)
 	get(liveProviderPath+"/categories/{category}/channels", s.handleLiveChannels)
@@ -581,7 +588,7 @@ func (s *Server) liveGuideMetadataCapture(r *http.Request, captured *[]frontend.
 	}
 	out := []model.Metadata{}
 	for _, p := range ps {
-		if category != "" && !frontend.LiveCategory(p.Item.Genres, category, p.Item.MediaType) {
+		if category != "" && !matchesLiveCategory(p.Item.Genres, category, p.Item.MediaType) {
 			continue
 		}
 		if id := chi.URLParam(r, "programme"); id != "" && p.ID != id {
@@ -897,13 +904,20 @@ func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 	}
 
 	const maxItems = 24
-	var sportsLive, sportsUpcoming, movies, news, tonight, kids []model.Metadata
-	seenSportsLive := map[string]bool{}
-	seenSportsUp := map[string]bool{}
-	seenMovies := map[string]bool{}
-	seenNews := map[string]bool{}
-	seenTonight := map[string]bool{}
-	seenKids := map[string]bool{}
+	var sportsLive, sportsUpcoming, movies, news, crime, reality, comedy, explore, tonight, kids []model.Metadata
+	seen := map[string]map[string]bool{
+		"sportsLive": {}, "sportsUp": {}, "movies": {}, "news": {},
+		"crime": {}, "reality": {}, "comedy": {}, "explore": {}, "tonight": {}, "kids": {},
+	}
+	appendUnique := func(bucket string, dst *[]model.Metadata, p frontend.LiveTVProgramme, dedupKey string) {
+		if len(*dst) >= maxItems || seen[bucket][dedupKey] {
+			return
+		}
+		if md, ok := toMeta(p); ok {
+			seen[bucket][dedupKey] = true
+			*dst = append(*dst, md)
+		}
+	}
 
 	for _, p := range ps {
 		if _, ok := byID[p.ChannelID]; !ok {
@@ -911,44 +925,35 @@ func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 		}
 		dedupKey := p.ChannelID + "|" + p.Item.Title
 		if frontend.LiveCategory(p.Item.Genres, "sports", p.Item.MediaType) {
-			if len(sportsLive) < maxItems && !seenSportsLive[dedupKey] {
-				if md, ok := toMeta(p); ok {
-					seenSportsLive[dedupKey] = true
-					sportsLive = append(sportsLive, md)
-				}
-			}
-			if p.Start.After(now) && len(sportsUpcoming) < maxItems && !seenSportsUp[dedupKey] {
-				if md, ok := toMeta(p); ok {
-					seenSportsUp[dedupKey] = true
-					sportsUpcoming = append(sportsUpcoming, md)
-				}
+			appendUnique("sportsLive", &sportsLive, p, dedupKey)
+			if p.Start.After(now) {
+				appendUnique("sportsUp", &sportsUpcoming, p, dedupKey)
 			}
 		}
-		if frontend.LiveCategory(p.Item.Genres, "movie", p.Item.MediaType) && len(movies) < maxItems && !seenMovies[dedupKey] {
-			if md, ok := toMeta(p); ok {
-				seenMovies[dedupKey] = true
-				movies = append(movies, md)
-			}
+		if frontend.LiveCategory(p.Item.Genres, "movie", p.Item.MediaType) {
+			appendUnique("movies", &movies, p, dedupKey)
 		}
-		if frontend.LiveCategory(p.Item.Genres, "news", p.Item.MediaType) && len(news) < maxItems && !seenNews[dedupKey] {
-			if md, ok := toMeta(p); ok {
-				seenNews[dedupKey] = true
-				news = append(news, md)
-			}
+		if frontend.LiveCategory(p.Item.Genres, "news", p.Item.MediaType) {
+			appendUnique("news", &news, p, dedupKey)
 		}
-		if frontend.LiveCategory(p.Item.Genres, "kids", p.Item.MediaType) && len(kids) < maxItems && !seenKids[dedupKey] {
-			if md, ok := toMeta(p); ok {
-				seenKids[dedupKey] = true
-				kids = append(kids, md)
-			}
+		if matchesLiveCategory(p.Item.Genres, "crime", p.Item.MediaType) {
+			appendUnique("crime", &crime, p, dedupKey)
+		}
+		if matchesLiveCategory(p.Item.Genres, "reality", p.Item.MediaType) {
+			appendUnique("reality", &reality, p, dedupKey)
+		}
+		if matchesLiveCategory(p.Item.Genres, "comedy", p.Item.MediaType) {
+			appendUnique("comedy", &comedy, p, dedupKey)
+		}
+		if matchesLiveCategory(p.Item.Genres, "explore", p.Item.MediaType) {
+			appendUnique("explore", &explore, p, dedupKey)
+		}
+		if frontend.LiveCategory(p.Item.Genres, "kids", p.Item.MediaType) {
+			appendUnique("kids", &kids, p, dedupKey)
 		}
 		hr := p.Start.In(now.Location()).Hour()
-		if (hr >= 18 || hr <= 1 || (!p.Start.After(now) && (frontend.LiveCategory(p.Item.Genres, "sports", p.Item.MediaType) || frontend.LiveCategory(p.Item.Genres, "news", p.Item.MediaType)))) &&
-			len(tonight) < maxItems && !seenTonight[dedupKey] {
-			if md, ok := toMeta(p); ok {
-				seenTonight[dedupKey] = true
-				tonight = append(tonight, md)
-			}
+		if hr >= 18 || hr <= 1 || (!p.Start.After(now) && (frontend.LiveCategory(p.Item.Genres, "sports", p.Item.MediaType) || frontend.LiveCategory(p.Item.Genres, "news", p.Item.MediaType))) {
+			appendUnique("tonight", &tonight, p, dedupKey)
 		}
 	}
 
@@ -977,6 +982,10 @@ func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 		{liveProviderPath + "/watchnow/categories/sports", "Upcoming Sports", "livetv.sports.upcoming", sportsUpcoming},
 		{liveProviderPath + "/watchnow/categories/movie", "Movies on TV", "livetv.movies", movies},
 		{liveProviderPath + "/watchnow/categories/news", "News", "livetv.news", news},
+		{liveProviderPath + "/watchnow/categories/crime", "True Crime", "livetv.crime", crime},
+		{liveProviderPath + "/watchnow/categories/reality", "Reality", "livetv.reality", reality},
+		{liveProviderPath + "/watchnow/categories/comedy", "Comedy", "livetv.comedy", comedy},
+		{liveProviderPath + "/watchnow/categories/explore", "Explore", "livetv.explore", explore},
 		{liveProviderPath + "/watchnow/all", "New & Live Tonight", "livetv.tonight", tonight},
 		{liveProviderPath + "/watchnow/categories/kids", "Kids & Family", "livetv.kids", kids},
 	}
