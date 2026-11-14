@@ -380,6 +380,11 @@ func arrangeLayout(rows []core.HomeRow, d core.HomeLayout, user int64, hc core.H
 		if p != nil && p.PreviewOnFocus != nil {
 			row.Hub.PreviewOnFocus = *p.PreviewOnFocus
 		}
+		// Built-in Top 10 families are ranked by default. Resolve this before
+		// the three-state owner policy so an explicit Off still wins.
+		if row.Kind == KindTop10 || row.Kind == KindTop10Today {
+			row.Hub.RankedTop10 = true
+		}
 		if p != nil && p.RankedTop10 != nil {
 			row.Hub.RankedTop10 = *p.RankedTop10
 		}

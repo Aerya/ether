@@ -4,7 +4,7 @@ import Library, { LibraryAside } from "./library/Library";
 import { styleCopy } from "./onair/naming";
 import { stylesName } from "./onair/naming";
 import { useLooks, LooksAside, LooksGallery, LookSurfaces } from "./onair/LooksGallery";
-import { SubtabNav } from "../../components/layout";
+import { OverflowTabs } from "../../components/OverflowTabs";
 import {
   Badge,
   Button,
@@ -160,8 +160,8 @@ export default function LiveTV() {
             ? "guide"
             : tab === "sources"
               ? "sources"
-              : prev === "guide"
-                ? "guide"
+              : prev === "guide" || prev === "guides"
+                ? prev
                 : "channels",
     );
   }, [tab]);
@@ -802,22 +802,26 @@ export default function LiveTV() {
                     });
                 }}
                 placeholder={
-                  leftTab === "library"
-                    ? t("Search Library")
-                    : leftTab === "looks"
-                      ? styleCopy("Search styles…")
-                      : leftTab === "sources"
-                        ? t("Find a channel, group or source…")
-                        : leftTab === "guide"
-                          ? t("Find a channel or guide…")
-                          : t("Find a channel or group…")
+                  leftTab === "guides"
+                    ? t("Search")
+                    : leftTab === "library"
+                      ? t("Search Library")
+                      : leftTab === "looks"
+                        ? styleCopy("Search styles…")
+                        : leftTab === "sources"
+                          ? t("Find a channel, group or source…")
+                          : leftTab === "guide"
+                            ? t("Find a channel or guide…")
+                            : t("Find a channel or group…")
                 }
                 aria-label={
-                  leftTab === "library"
-                    ? t("Search Library")
-                    : leftTab === "looks"
-                      ? styleCopy("Search styles")
-                      : t("Search channels")
+                  leftTab === "guides"
+                    ? t("Search")
+                    : leftTab === "library"
+                      ? t("Search Library")
+                      : leftTab === "looks"
+                        ? styleCopy("Search styles")
+                        : t("Search channels")
                 }
                 className="h-8 pl-7 text-sm"
               />
@@ -841,7 +845,7 @@ export default function LiveTV() {
                 ]}
                 menuClassName="w-48"
               />
-            ) : leftTab === "looks" ? null : (
+            ) : leftTab === "looks" || leftTab === "guides" ? null : (
               <>
                 <ToolbarPicker
                   ariaLabel={t("Show")}
@@ -872,10 +876,9 @@ export default function LiveTV() {
             )}
           </div>
         }
-        <div className="flex items-center justify-between">
-          <SubtabNav
+        <div className="min-w-0 w-full">
+          <OverflowTabs
             ariaLabel={t("Lineup")}
-            className="justify-start"
             active={leftTab}
             onSelect={(next) => {
               setLeftTab(next);
@@ -887,11 +890,11 @@ export default function LiveTV() {
             tabs={[
               { key: "channels", label: t("Channels") },
               { key: "guide", label: t("Guide") },
+              { key: "guides", label: t("Guides") },
               { key: "looks", label: stylesName() },
               { key: "library", label: t("Library") },
             ]}
           />
-          <OwnerGuides />
         </div>
       </PanelHead>
     ),
@@ -926,7 +929,7 @@ export default function LiveTV() {
     <>
       {panelHead}
       <div className="app-scroll min-h-0 flex-1 lg:overflow-y-auto">
-        {leftTab === "library" ? (
+        {leftTab === "guides" ? null : leftTab === "library" ? (
           <LibraryAside />
         ) : leftTab === "looks" ? (
           <LooksAside
@@ -1047,7 +1050,9 @@ export default function LiveTV() {
   const guideSource = guideSourceId ? sources.find((x) => x.id === guideSourceId) : undefined;
   const mainClassName = "";
   const main =
-    leftTab === "library" ? (
+    leftTab === "guides" ? (
+      <OwnerGuides query={q} />
+    ) : leftTab === "library" ? (
       <div className="p-4 sm:p-6">
         <Library />
       </div>
@@ -1265,7 +1270,20 @@ export default function LiveTV() {
           aside={aside}
           main={main}
         >
-          {state ?? (leftTab === "channels" ? lineupGuide : undefined)}
+          {state ??
+            (leftTab === "guides" ? (
+              <div className="flex min-h-0 flex-1 flex-col">
+                {panelHead}
+                <main
+                  aria-label={t("Live TV workspace")}
+                  className="app-scroll min-h-0 flex-1 overflow-y-auto"
+                >
+                  {main}
+                </main>
+              </div>
+            ) : leftTab === "channels" ? (
+              lineupGuide
+            ) : undefined)}
         </Workspace>
       )}
       <Drawer

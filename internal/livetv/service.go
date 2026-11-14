@@ -34,6 +34,12 @@ CREATE TABLE livetv_policies(user_id INTEGER PRIMARY KEY, data TEXT NOT NULL);`)
 }
 
 type Service struct {
+	searchDemanded                            atomic.Bool
+	searchVirtualMu                           sync.Mutex
+	searchVirtualSnapshots                    map[string]virtualSearchIndexedSnapshot
+	searchMu                                  sync.Mutex
+	searchBuilding, searchReady, searchClosed bool
+
 	ownerGuidesMu    sync.Mutex
 	ownerGuideGroups []guideChoice
 	ownerGuideRev    int64
@@ -158,7 +164,7 @@ func New(o Options) (*Service, error) {
 		o.Logger = slog.Default()
 	}
 	if o.HTTPClient == nil {
-		o.HTTPClient = egress.Client(egress.CapDirect, 20*time.Second)
+		o.HTTPClient = egress.Client(egress.CapLiveTV, 20*time.Second)
 	}
 	o.HTTPClient = sourceHTTPClient(o.HTTPClient)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -339,6 +345,9 @@ func sourceOrigin(src Source) string {
 }
 func (s *Service) Close() error {
 	s.closeOnce.Do(func() {
+		s.searchMu.Lock()
+		s.searchClosed = true
+		s.searchMu.Unlock()
 		close(s.lifetimeStop)
 		<-s.lifetimeDone
 		s.cancel()

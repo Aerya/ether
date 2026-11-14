@@ -70,19 +70,6 @@ func (a *App) searchSourcesFor(stepAside *experience.StepAside) experience.Searc
 			return stepAside.FilterAvailable(ctx, ts), nil
 		}
 	}
-	if a.discoveryFeatures != nil {
-		src.Natural = experience.DiscoverySearch(a.discoveryFeatures.Frontend())
-		if stepAside != nil {
-			baseNatural := src.Natural
-			src.Natural = func(ctx context.Context, viewer *core.User, query string, limit int) ([]core.Title, bool) {
-				ts, ok := baseNatural(ctx, viewer, query, limit)
-				if !ok {
-					return nil, false
-				}
-				return stepAside.FilterAvailable(core.WithCatalogViewer(ctx, viewer), ts), true
-			}
-		}
-	}
 	if a.state != nil {
 		src.Familiar = experience.FamiliarFrom(a.state)
 	}
@@ -1244,4 +1231,21 @@ type neutralLayoutFunc func(context.Context, *core.User, core.HomeSituation, str
 
 func (f neutralLayoutFunc) FinalizeNeutralHome(ctx context.Context, user *core.User, situation core.HomeSituation, section string, rows []core.NeutralHomeRow) ([]core.NeutralHomeRow, error) {
 	return f(ctx, user, situation, section, rows)
+}
+
+func (v stepAsideVibe) DescriptiveSearchAvailable() bool {
+	source, ok := v.VibeSearcher.(core.DescriptiveSearcher)
+	return ok && source.DescriptiveSearchAvailable()
+}
+
+func (v stepAsideVibe) DescribeSearch(ctx context.Context, user *core.User, query string, wait bool) (core.DescriptiveResult, error) {
+	source, ok := v.VibeSearcher.(core.DescriptiveSearcher)
+	if !ok {
+		return core.DescriptiveResult{State: "unavailable"}, nil
+	}
+	result, err := source.DescribeSearch(ctx, user, query, wait)
+	if err == nil {
+		result.Items = v.stepAside.FilterAvailable(core.WithCatalogViewer(ctx, user), result.Items)
+	}
+	return result, err
 }
