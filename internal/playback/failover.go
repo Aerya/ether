@@ -430,6 +430,10 @@ func (m *Manager) openGeneration(ctx context.Context, s *session, res *core.Reso
 		}
 		return nil, fmt.Errorf("open %s: %w", res.Release.Name, err)
 	}
+	if s.title != nil && s.title.Type == core.TypeMovie && res.Release.Target != nil && len(res.Release.Target.MovieTitles) > 0 && !releaseparse.MovieFileMatches(src.Name(), append([]string{s.title.Title, s.title.OriginalTitle}, s.title.AlternativeTitles...), s.title.Year) {
+		finish(src.Close())
+		return nil, fmt.Errorf("open %s: %w: movie file identity does not match", res.Release.Name, core.ErrWrongContent)
+	}
 	if src.Size() <= 0 {
 		finish(src.Close())
 		return nil, fmt.Errorf("open %s: empty media file", res.Release.Name)

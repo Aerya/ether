@@ -693,7 +693,7 @@ func ChooseFile(files []File, target *core.ReleaseTarget) (File, error) {
 				return File{}, fmt.Errorf("debrid: fileIndex %d outside file list of %d: %w", i, len(files), core.ErrWrongContent)
 			}
 			f := files[i]
-			if f.Size <= 0 || !matches(f) {
+			if f.Size <= 0 || !matches(f) || !movieFileMatches(f.Path, target) {
 				return File{}, fmt.Errorf("debrid: selected file is empty or does not match file: %w", core.ErrWrongContent)
 			}
 			return f, nil
@@ -701,7 +701,7 @@ func ChooseFile(files []File, target *core.ReleaseTarget) (File, error) {
 		var chosen File
 		count := 0
 		for _, f := range files {
-			if f.Size > 0 && matches(f) {
+			if f.Size > 0 && matches(f) && movieFileMatches(f.Path, target) {
 				chosen = f
 				count++
 			}
@@ -964,6 +964,9 @@ func fileIdentityMatches(f File, target *core.ReleaseTarget) bool {
 	if target == nil {
 		return true
 	}
+	if len(target.MovieTitles) > 0 {
+		return movieFileMatches(f.Path, target)
+	}
 	idMatch, idConflict := releaseparse.CompareTitleIDs(target.ReportedIDs, target.ExpectedIDs)
 	if idConflict {
 		return false
@@ -977,4 +980,8 @@ func fileIdentityMatches(f File, target *core.ReleaseTarget) bool {
 	info := releaseparse.Parse(full)
 	year := releaseparse.EpisodeSeriesYear(full, info.Year)
 	return releaseparse.SeriesYearMatches(year, target.ShowYear) && (target.Season == 0 || year != 0 || idMatch || releaseparse.EpisodeTitleMatches(path.Base(strings.ReplaceAll(f.Path, "\\", "/")), target.EpisodeTitle))
+}
+
+func movieFileMatches(name string, target *core.ReleaseTarget) bool {
+	return target == nil || len(target.MovieTitles) == 0 || releaseparse.MovieFileMatches(name, target.MovieTitles, target.MovieYear)
 }
