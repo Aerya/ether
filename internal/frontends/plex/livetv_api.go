@@ -86,7 +86,6 @@ func (s *Server) liveTVProvider(ctx context.Context, u *frontend.User) *model.Me
 	if !s.liveTVEnabled() || !s.svc().liveTV.VisibleTo(ctx, u) {
 		return nil
 	}
-	promotedFilters := s.livePromotedGuideFilters()
 	filters := s.liveGuideFilters(ctx, u)
 	return &model.MediaProvider{Extra: []model.Attr{model.A("id", 1), model.A("parentID", 1), model.A("providerIdentifier", "tv.plex.providers.epg.xmltv"), model.A("epgSource", "XMLTV")}, Identifier: frontend.LiveTVProvider, Title: "Live TV", Types: "video", Protocols: "livetv", Feature: []model.Feature{
 		{
@@ -106,7 +105,7 @@ func (s *Server) liveTVProvider(ctx context.Context, u *frontend.User) *model.Me
 			}},
 		},
 		{Type: "universalsearch", Key: liveProviderPath + "/library/search"},
-		{Type: "grid", Key: liveProviderPath + "/grid", PromotedGridChannelFilter: promotedFilters, GridChannelFilter: filters},
+		{Type: "grid", Key: liveProviderPath + "/grid", GridChannelFilter: filters},
 		{Type: "metadata", Key: liveProviderPath + "/metadata"},
 		{Type: "livetv", Key: "/livetv/dvrs"},
 		{Type: "promoted", Key: liveProviderPath + "/hubs/promoted"},

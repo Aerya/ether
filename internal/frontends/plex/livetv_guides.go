@@ -28,23 +28,25 @@ func normalizeLiveCategory(raw string) (string, bool) {
 	}
 }
 
-func (s *Server) livePromotedGuideFilters() []model.GridChannelFilter {
+func liveCategoryGuideFilters() []model.GridChannelFilter {
 	cats := []struct {
-		ident string
-		title string
+		ident          string
+		genreRatingKey string
+		title          string
 	}{
-		{"movies", "Movies"},
-		{"sports", "Sports"},
-		{"news", "News"},
-		{"kids-family", "Kids & Family"},
-		{"entertainment", "Entertainment"},
+		{"movies", "genre_620143f98578b9238e1cdb89", "Movies"},
+		{"sports", "genre_620143f98578b9238e1cdb8a", "Sports"},
+		{"news", "genre_6006cc1d610ee2002c74f37a", "News"},
+		{"kids-family", "genre_6074b802507c8d42cf7e1678", "Kids & Family"},
+		{"entertainment", "genre_6a0c2728768cf9b31f6fe02a", "Entertainment"},
 	}
 	out := make([]model.GridChannelFilter, 0, len(cats))
 	for _, c := range cats {
 		out = append(out, model.GridChannelFilter{
-			Identifier: c.ident,
-			Key:        liveProviderPath + "/lineups/dvr/channels?genre=" + c.ident,
-			Title:      c.title,
+			Identifier:     c.ident,
+			Key:            liveProviderPath + "/lineups/dvr/channels?genre=" + c.ident,
+			GenreRatingKey: c.genreRatingKey,
+			Title:          c.title,
 		})
 	}
 	return out
@@ -56,13 +58,13 @@ func (s *Server) liveGuideFilters(ctx context.Context, u *frontend.User) []model
 		guides, err := g.Guides(ctx, u)
 		if err != nil {
 			s.log.Warn("live guides unavailable", "error", err)
-			return append(out, s.livePromotedGuideFilters()...)
+			return append(out, liveCategoryGuideFilters()...)
 		}
 		for _, g := range guides {
 			out = append(out, model.GridChannelFilter{Identifier: "guide-" + g.ID, Key: liveProviderPath + "/guides/" + url.PathEscape(g.ID) + "/channels", GenreRatingKey: "ether.guide." + g.ID, Title: g.Name})
 		}
 	}
-	return append(out, s.livePromotedGuideFilters()...)
+	return append(out, liveCategoryGuideFilters()...)
 }
 func (s *Server) liveCategoryChannels(r *http.Request, cs []frontend.LiveTVChannel, category string) ([]frontend.LiveTVChannel, error) {
 	canonical, ok := normalizeLiveCategory(category)
