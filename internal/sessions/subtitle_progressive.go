@@ -55,7 +55,7 @@ func (b *Broker) progressiveSubtitle(s *brokerSession, info core.MediaInfo, stre
 			return false
 		}
 	}
-	if stream.External || (stream.Codec != "subrip" && stream.Codec != "srt" && stream.Codec != "webvtt") {
+	if stream.External || !transcode.IsTextSubtitle(stream.Codec) {
 		return false
 	}
 	for _, index := range progressiveTextTracks(string(s.public.Protocol), s.caps, info) {

@@ -357,6 +357,33 @@ func TestBuildRungsHealthyLinkKeepsOriginal(t *testing.T) {
 // One contract covers the MSE startup invariants: metadata is free, first
 // selected rendition starts once, and every rung advertises the same clock.
 func TestMSELazyContinuousRenditions(t *testing.T) {
+	t.Run("decoder and policy ladder limits", func(t *testing.T) {
+		for n, codecs := range [][]string{{}, {"hevc"}, {"h264"}} {
+			fr := newFakeRunner()
+			m := newTestManager(t, fr, config.Transcode{ABRLadder: true})
+			req := ladderEncodeRequest(t, fmt.Sprintf("caps-%d", n), 10*time.Minute)
+			req.LazyStart, req.Continuous = true, true
+			req.LadderVideoCodecs = codecs
+			s := startSession(t, m, req)
+			if n < 2 && len(s.Rungs()) != 1 {
+				t.Fatal("unapproved encoded rungs", s.Rungs())
+			}
+			if n == 2 && len(s.Rungs()) < 2 {
+				t.Fatal("approved ladder missing")
+			}
+			if fr.startCount() != 0 {
+				t.Fatal("metadata started encoder")
+			}
+		}
+		info := ladderEncodeRequest(t, "geometry", time.Minute).Info
+		caps := core.ClientCaps{VideoCodecs: []string{"h264"}, AudioCodecs: []string{"aac"}}
+		d := Decide(info, caps, core.DecideOptions{MaxWidth: 1280, MaxHeight: 1080, MaxBitrateKbps: 4000, AudioStream: -1, SubtitleStream: -1}, Policy{})
+		for _, r := range buildRungs(info, d, adaptiveSettings{Ladder: true}) {
+			if r.width > 1280 || r.height > 1080 || r.avgKbps > 4000 {
+				t.Fatalf("rung exceeds caps: %+v", r)
+			}
+		}
+	})
 	fr := newFakeRunner()
 	m := newTestManager(t, fr, config.Transcode{ABRLadder: true})
 	req := ladderEncodeRequest(t, "mse-lazy", 10*time.Minute)

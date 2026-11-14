@@ -8,13 +8,10 @@ import (
 	"github.com/braedonsaunders/ether/internal/frontend"
 )
 
-// refreshOutput runs only for an opened MSE session. Unknown codec tokens stay
+// refreshOutput runs only for an opened HLS session. Unknown codec tokens stay
 // unknown until an actual init segment proves them; it never starts encoders.
 // Caller holds s.mu, keeping these facts inside the active seek generation.
 func (i *instance) refreshOutput(ctx context.Context, id string, s *playSession) bool {
-	if !s.mse {
-		return false
-	}
 	hs, ok := i.host.Sessions.TranscodeFor(ctx, id)
 	if !ok || hs == nil {
 		return false

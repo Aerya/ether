@@ -745,6 +745,18 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		adapt.FastStart, adapt.Governor, adapt.Ladder = false, false, false
 	}
 	rungs := buildRungs(req.Info, d, adapt)
+	if req.LadderVideoCodecs != nil {
+		allowed := rungs[:1]
+		for _, rung := range rungs[1:] {
+			for _, codec := range req.LadderVideoCodecs {
+				if rung.decision.VideoCodec == codec {
+					allowed = append(allowed, rung)
+					break
+				}
+			}
+		}
+		rungs = allowed
+	}
 	if proto == core.ProtocolHLS && d.Container == ContainerMatroska && len(rungs) > 1 {
 		// Plex's native player probes every rendition's initialization and
 		// early segments concurrently. These rungs share one encoder, so

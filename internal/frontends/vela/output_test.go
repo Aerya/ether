@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,11 +33,33 @@ func (*trackFixture) StreamDecision(context.Context, frontend.SessionAccess, str
 }
 
 func TestVelaPlaybackOutputInvariants(t *testing.T) {
+	t.Run("typed delivery preserves source identities", func(t *testing.T) {
+		sessions := &frontendtest.Sessions{SubtitleURLFunc: func(_ context.Context, _ frontend.SessionAccess, _ string, index int, format string) (string, error) {
+			return "/sessions/media/s/grant/subtitles/" + strconv.Itoa(index) + ".vtt?ether_window=1&from_ms=0", nil
+		}}
+		i := &instance{host: frontend.Host{Sessions: sessions}}
+		media := core.MediaInfo{Streams: []core.StreamInfo{{Index: 1, Type: "audio", Codec: "truehd", Channels: 8}, {Index: 7, Type: "audio", Codec: "ac3", Channels: 6}, {Index: 9, Type: "subtitle", Codec: "pgs"}, {Index: 11, Type: "subtitle", Codec: "ass"}}}
+		d := core.Decision{AudioStream: 1, AudioCodec: "aac", SubtitleStream: 9, BurnSubtitles: true}
+		audio, subs, _, selected := i.playbackTracks(context.Background(), frontend.SessionAccess{}, "s", media, d, 9, false, nil, true)
+		if len(audio) != 2 || len(subs) != 2 || selected != "9" || subs[0]["codec"] != "pgs" || subs[0]["delivery"].(object)["kind"] != "burn-in" || subs[0]["url"] != nil {
+			t.Fatal(audio, subs, selected)
+		}
+		delivery := subs[1]["delivery"].(object)
+		if delivery["kind"] != "external" || delivery["format"] != "webvtt-window" || delivery["url"] != subs[1]["url"] || subs[1]["codec"] != "webvtt" {
+			t.Fatal(subs[1])
+		}
+		d.AudioStream = 7
+		d.AudioCopy = true
+		audio, subs, _, selected = i.playbackTracks(context.Background(), frontend.SessionAccess{}, "s", media, d, -1, true, []string{"pgs", "ass"}, true)
+		if audio[0]["codec"] != "truehd" || audio[0]["channels"] != 8 || selected != nil || subs[0]["streamIndex"] != 9 || subs[0]["delivery"].(object)["kind"] != "embedded" {
+			t.Fatal(audio, subs, selected)
+		}
+	})
 	t.Run("codec evidence and generations", func(t *testing.T) {
 		output := &outputFixture{rungs: []core.HLSRung{{ID: "base", Width: 1920, Height: 1080, Bandwidth: 8000000, Codecs: "estimated-should-not-escape"}}}
 		sessions := &frontendtest.Sessions{TranscodeForFunc: func(context.Context, string) (core.HLSSession, bool) { return output, true }}
 		i := &instance{host: frontend.Host{Sessions: sessions}}
-		s := &playSession{mse: true, source: 3, seek: 4, plan: object{"paths": []object{{"transport": "hls", "url": "/sessions/media/id/scoped-secret/master.m3u8", "qualities": []object{}}}}}
+		s := &playSession{source: 3, seek: 4, plan: object{"paths": []object{{"transport": "hls", "url": "/sessions/media/id/scoped-secret/master.m3u8", "qualities": []object{}}}}}
 		i.refreshOutput(context.Background(), "id", s)
 		if s.plan["paths"].([]object)[0]["initialRenditionId"] != "base" {
 			t.Fatal("initial recommendation is not a real advertised rung")

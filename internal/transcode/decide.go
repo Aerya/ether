@@ -577,6 +577,9 @@ func Decide(info core.MediaInfo, caps core.ClientCaps, opts core.DecideOptions, 
 	}
 	bitrateCap := minPositive(opts.MaxBitrateKbps, caps.MaxBitrateKbps, remoteCap)
 	heightCap := minPositive(caps.MaxHeight, opts.MaxHeight)
+	if opts.MaxWidth > 0 && v != nil && v.Width > opts.MaxWidth && v.Height > 0 {
+		heightCap = minPositive(heightCap, max(2, (v.Height*opts.MaxWidth/v.Width)/2*2))
+	}
 	burn := sub != nil && BurnsSubtitle(*sub, caps, opts)
 	if a != nil && len(opts.AudioFilters) > 0 {
 		d.AudioFilters = append([]string(nil), opts.AudioFilters...)

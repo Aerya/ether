@@ -853,7 +853,7 @@ func (b *Broker) h264EncoderVerified() bool {
 }
 
 func (b *Broker) decideProfile(ps *core.PlaySession, req frontend.PlanRequest) (core.Decision, error) {
-	if req.Protocol == "vela" && req.Channel == "" && req.Intent.Options.DirectPlay && ps != nil && (req.Intent.OriginalPlayback.Supports(ps.Info, req.Intent.Options.AudioStream) || (b.AudioFallbackAvailable() && req.Intent.OriginalPlayback.SupportsAudio("aac") && (req.Intent.AllowTranscoding == nil || *req.Intent.AllowTranscoding) && req.Intent.OriginalPlayback.SupportsVideo(ps.Info))) {
+	if req.Protocol == "vela" && req.Channel == "" && req.Intent.Options.DirectPlay && ps != nil && !selectedImageSubtitle(ps.Info, req.Intent.Options.SubtitleStream) && (req.Intent.OriginalPlayback.Supports(ps.Info, req.Intent.Options.AudioStream) || (b.AudioFallbackAvailable() && req.Intent.OriginalPlayback.SupportsAudio("aac") && (req.Intent.AllowTranscoding == nil || *req.Intent.AllowTranscoding) && req.Intent.OriginalPlayback.SupportsVideo(ps.Info))) {
 		d := core.Decision{Kind: core.DecisionDirectPlay, Reason: "original_runtime", Container: ps.Info.Container, VideoCopy: true, AudioCopy: true, AudioStream: req.Intent.Options.AudioStream, SubtitleStream: req.Intent.Options.SubtitleStream}
 		for _, s := range ps.Info.Streams {
 			if s.Type == "video" {
@@ -993,4 +993,15 @@ func (b *Broker) decideProfile(ps *core.PlaySession, req frontend.PlanRequest) (
 	}
 	b.profileDiagnostic(ProfileNoDelivery)
 	return core.Decision{}, core.ErrNotAvailable
+}
+
+// Original-file decoders cannot apply a server-side image subtitle selection.
+// An explicit image track must use the normal burn-in decision instead.
+func selectedImageSubtitle(info core.MediaInfo, index int) bool {
+	for _, track := range info.Streams {
+		if track.Type == "subtitle" && track.Index == index {
+			return transcode.IsImageSubtitle(track.Codec)
+		}
+	}
+	return false
 }

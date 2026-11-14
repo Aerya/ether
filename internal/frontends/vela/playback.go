@@ -33,6 +33,9 @@ type client struct {
 }
 type playSession struct {
 	scope             string
+	media             frontend.MediaInfo
+	subtitleFormats   []string
+	canBurn           bool
 	mse               bool
 	preparation       []frontend.HLSPreparationEvent
 	diagnostics       any
@@ -118,7 +121,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	options := frontend.DecideOptions{DirectPlay: true, DirectStream: b.Client.HLS || b.Client.MSE, AudioStream: -1, SubtitleStream: -1}
+	options := frontend.DecideOptions{MaxWidth: b.Client.MaxWidth, MaxHeight: b.Client.MaxHeight, MaxBitrateKbps: b.Client.MaxBitrate / 1000, DirectPlay: true, DirectStream: b.Client.HLS || b.Client.MSE, AudioStream: -1, SubtitleStream: -1}
 	if b.Client.MSE {
 		options.ToneMapMaxHeight = 720
 		options.ToneMapMaxBitrateKbps = 4000
@@ -155,13 +158,13 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	}
 	profile := caps.DeviceProfile{MaxStreamingBitrate: b.Client.MaxBitrate, DirectPlayProfiles: []caps.DirectPlayProfile{{Type: "Video", Container: strings.Join(b.Client.Containers, ","), VideoCodec: strings.Join(b.Client.VideoCodecs, ","), AudioCodec: strings.Join(b.Client.AudioCodecs, ",")}}}
 	if b.Client.HLS || b.Client.MSE {
-		container := "ts"
-		if b.Client.MSE {
-			container = "mp4"
-		}
+		container := "mp4"
 		profile.TranscodingProfiles = []caps.TranscodingProfile{{Type: "Video", Protocol: "hls", Container: container, VideoCodec: strings.Join(b.Client.VideoCodecs, ","), AudioCodec: strings.Join(b.Client.AudioCodecs, ",")}}
 	}
 	for _, format := range b.Client.SubtitleFormats {
+		if (b.Client.HLS || b.Client.MSE) && format == "webvtt" {
+			profile.SubtitleProfiles = append(profile.SubtitleProfiles, caps.SubtitleProfile{Format: "ether-vtt-window", Method: "External"})
+		}
 		profile.SubtitleProfiles = append(profile.SubtitleProfiles, caps.SubtitleProfile{Format: format, Method: "External"})
 	}
 	declared, e := i.host.Capabilities.Build(i.identityContext(r), frontend.CapabilityRequest{Viewer: v, Device: caps.DeviceInfo{Protocol: "vela", Product: "Vela", Platform: b.Client.Device.Platform, Version: b.Client.Device.AppVersion, ClientID: b.Client.Device.ID, DeviceName: b.Client.Device.Name, VideoCodecs: b.Client.VideoCodecs, AudioCodecs: b.Client.AudioCodecs, Containers: b.Client.Containers, SubtitleCodecs: b.Client.SubtitleFormats, MaxHeight: b.Client.MaxHeight, MaxBitrateKbps: b.Client.MaxBitrate / 1000}, Profile: profile, UserAgent: r.UserAgent()})
@@ -225,7 +228,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 		transport = "hls"
 		mime = "application/vnd.apple.mpegurl"
 	}
-	url, e := i.host.Sessions.StartStream(r.Context(), i.access(r, v), s.ID, frontend.StreamRequest{Format: format, Position: pos, LazyStart: b.Client.MSE, Continuous: b.Client.MSE})
+	url, e := i.host.Sessions.StartStream(r.Context(), i.access(r, v), s.ID, frontend.StreamRequest{Format: format, Position: pos, LazyStart: true, Continuous: true})
 	if e != nil {
 		_ = i.host.Sessions.Stop(r.Context(), i.access(r, v), s.ID)
 		fail(w, e)
@@ -259,50 +262,13 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	if plan.ETag != "" {
 		path["sourceId"] = plan.ETag
 	}
-	audio, subs := []object{}, []object{}
-	var selectedSub any
-	selectedAudio := ""
-	for _, track := range plan.Media.Streams {
-		if track.Type != "audio" && track.Type != "subtitle" {
-			continue
-		}
-		t := object{"id": strconv.Itoa(track.Index), "streamIndex": track.Index, "kind": track.Type, "language": track.Language, "name": track.Title, "codec": track.Codec, "default": track.Default, "forced": track.Forced, "channels": track.Channels}
-		if track.Type == "audio" {
-			if track.Index == plan.Decision.AudioStream && !plan.Decision.AudioCopy && plan.Decision.AudioCodec != "" {
-				t["codec"] = plan.Decision.AudioCodec
-				delete(t, "channels")
-			}
-			audio = append(audio, t)
-			if track.Index == plan.Decision.AudioStream {
-				selectedAudio = t["id"].(string)
-			}
-		} else {
-			// Burned output has no second client overlay. Preserve the real source
-			// codec/ID, especially for image subtitles that cannot become WebVTT.
-			if track.Index == plan.Decision.SubtitleStream && plan.Decision.BurnSubtitles {
-				subs = append(subs, t)
-				selectedSub = t["id"]
-				continue
-			}
-			url, err := i.host.Sessions.SubtitleURL(r.Context(), i.access(r, v), s.ID, track.Index, "vtt")
-			if err != nil && !original {
-				continue
-			}
-			if err == nil {
-				t["url"] = url
-			}
-			if !original {
-				t["codec"] = "webvtt"
-				if strings.Contains(url, "ether_window=1") {
-					t["format"] = "webvtt-window"
-				}
-			}
-			subs = append(subs, t)
-			if track.Index == plan.Decision.SubtitleStream {
-				selectedSub = t["id"]
-			}
-		}
+	_, trackChanges := i.host.Sessions.(frontend.StreamDecisionReader)
+	canBurn := trackChanges && plan.Transcoding && plan.HLS && (b.Client.HLS || b.Client.MSE)
+	selectedSubIndex := plan.Decision.SubtitleStream
+	if subtitleSet {
+		selectedSubIndex = options.SubtitleStream
 	}
+	audio, subs, selectedAudio, selectedSub := i.playbackTracks(r.Context(), i.access(r, v), s.ID, plan.Media, plan.Decision, selectedSubIndex, original, b.Client.SubtitleFormats, canBurn)
 	p := object{"sessionId": s.ID, "revision": uint64(1), "sourceGeneration": uint64(1), "seekGeneration": uint64(1), "state": "ready", "positionSeconds": pos.Seconds(), "durationSeconds": plan.Media.Duration.Seconds(), "paths": []object{path}, "selectedPathId": "primary", "audioTracks": audio, "subtitleTracks": subs, "selectedSubtitleTrackId": selectedSub, "chapters": chapters(plan.Media), "fallback": object{"state": "unsupported"}}
 	if plan.Media.Duration <= 0 {
 		delete(p, "durationSeconds")
@@ -328,13 +294,16 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 		}
 		p["paths"] = []object{path, {"id": "fallback-hls", "kind": fallbackKind, "transport": "hls", "mimeType": "application/vnd.apple.mpegurl", "readiness": "on-demand", "sourceId": plan.ETag, "timelineId": plan.ETag, "qualities": []object{}, "boundaries": []object{}}}
 	}
-	ps := &playSession{scope: scope, mse: b.Client.MSE, viewer: v.ID, device: requestDevice(r).ID, plan: p, source: 1, seek: 1, revision: 1, cursor: 1, signal: make(chan struct{}), position: pos}
+	ps := &playSession{scope: scope, canBurn: canBurn, media: plan.Media, subtitleFormats: append([]string(nil), b.Client.SubtitleFormats...), mse: b.Client.MSE, viewer: v.ID, device: requestDevice(r).ID, plan: p, source: 1, seek: 1, revision: 1, cursor: 1, signal: make(chan struct{}), position: pos}
 
 	if !plan.SourceChosenAt.IsZero() {
 		ps.preparation = append(ps.preparation, frontend.HLSPreparationEvent{Stage: "source-chosen", At: plan.SourceChosenAt})
 	}
 	if !plan.DecisionAt.IsZero() {
 		ps.preparation = append(ps.preparation, frontend.HLSPreparationEvent{Stage: "decision", At: plan.DecisionAt})
+	}
+	if transport == "hls" {
+		i.refreshTrackDelivery(r.Context(), i.access(r, v), s.ID, ps)
 	}
 	i.refreshOutput(r.Context(), s.ID, ps)
 	i.mu.Lock()
@@ -486,7 +455,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		if path["transport"] == "hls" {
 			format = frontend.StreamHLS
 		}
-		url, err := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: format, Position: pos, LazyStart: s.mse, Continuous: s.mse})
+		url, err := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: format, Position: pos, LazyStart: true, Continuous: true})
 		if err != nil {
 			fail(w, err)
 			return
@@ -503,6 +472,9 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 			path["timelineOriginSeconds"] = pos.Seconds()
 		}
 		s.plan["selectedPathId"] = b.PathID
+		if format == frontend.StreamHLS {
+			i.refreshTrackDelivery(r.Context(), i.access(r, v), id, s)
+		}
 		s.position = pos
 		s.retainDiagnostics()
 		s.seek++
@@ -519,7 +491,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		paths := s.plan["paths"].([]object)
 		path := selectedPlaybackPath(s.plan, paths)
 		if path["transport"] == "hls" {
-			url, e := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: frontend.StreamHLS, Position: pos, LazyStart: s.mse, Continuous: s.mse})
+			url, e := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: frontend.StreamHLS, Position: pos, LazyStart: true, Continuous: true})
 			if e != nil {
 				fail(w, e)
 				return
@@ -575,7 +547,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 			problem(w, 400, "request", "invalid_request")
 			return
 		}
-		url, err := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: frontend.StreamHLS, Position: s.position, LazyStart: s.mse, Continuous: s.mse, AudioStream: audio, SubtitleStream: sub})
+		url, err := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: frontend.StreamHLS, Position: s.position, LazyStart: true, Continuous: true, AudioStream: audio, SubtitleStream: sub})
 		if err != nil {
 			fail(w, err)
 			return
@@ -609,12 +581,13 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 				}
 				path["kind"] = kind
 				path["decisionReason"] = d.Reason
-				tracks, _ := s.plan["audioTracks"].([]object)
-				for _, track := range tracks {
-					if track["id"] == b.AudioTrackID && !d.AudioCopy && d.AudioCodec != "" {
-						track["codec"] = d.AudioCodec
-						delete(track, "channels")
+				if len(s.media.Streams) > 0 {
+					selected := -1
+					if subID != nil {
+						selected, _ = strconv.Atoi(subID.(string))
 					}
+					audioTracks, subtitleTracks, _, _ := i.playbackTracks(r.Context(), i.access(r, v), id, s.media, d, selected, false, s.subtitleFormats, s.canBurn)
+					s.plan["audioTracks"], s.plan["subtitleTracks"] = audioTracks, subtitleTracks
 				}
 			}
 		}

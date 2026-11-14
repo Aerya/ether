@@ -240,6 +240,14 @@ func (b *Broker) StartStream(ctx context.Context, a frontend.SessionAccess, id s
 	}
 	b.transcodeStop(id)
 	request := core.HLSRequest{LazyStart: req.LazyStart, Diagnostics: req.Continuous, Continuous: req.Continuous, RequireIndependentProof: b.policy(s.public.Protocol).DistributedBindings, SessionID: id, ReleaseID: ps.SourceReleaseID(), InputURL: b.deps.Playback.InputURL(s.playID), Info: ps.Info, Decision: dec, StartOffset: req.Position, SegmentDuration: req.SegmentDuration, Protocol: proto}
+	if req.Continuous {
+		// A continuous playback client declares its decoder set. Optional
+		// encoded rungs must also respect its session's transcoding policy.
+		request.LadderVideoCodecs = []string{}
+		if s.allowTranscoding == nil || *s.allowTranscoding {
+			request.LadderVideoCodecs = append(request.LadderVideoCodecs, s.caps.VideoCodecs...)
+		}
+	}
 	request.TextSubtitleStreams = progressiveTextTracks(string(s.public.Protocol), s.caps, ps.Info)
 	if len(request.TextSubtitleStreams) > 0 {
 		request.TextSubtitleSource = sourceRevision(ps)

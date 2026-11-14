@@ -26,8 +26,11 @@ type HLSRamp struct {
 
 type HLSRequest struct {
 	// LazyStart defers the first encoder until the client selects a rendition.
-	LazyStart   bool
-	Diagnostics bool
+	LazyStart bool
+	// LadderVideoCodecs restricts optional encoded rungs when non-nil.
+	// An empty list permits only the primary decision.
+	LadderVideoCodecs []string
+	Diagnostics       bool
 	// Continuous disables ramps and governor changes that introduce discontinuities.
 	Continuous bool
 	Ramp       HLSRamp    `json:",omitzero"`
@@ -169,6 +172,7 @@ type DecideOptions struct {
 	DirectStream   bool     // client allows remux
 	MaxBitrateKbps int      // client-requested cap (maxVideoBitrate)
 	MaxHeight      int      // from videoResolution
+	MaxWidth       int      // explicit output width ceiling
 	AudioStream    int      // selected stream index, -1 default
 	SubtitleStream int      // -1 none
 	AudioFilters   []string // trusted owner/viewer audio processing; forces audio encoding

@@ -74,13 +74,19 @@ func TestScopedOutputTrackRestart(t *testing.T) {
 	caps := core.ClientCaps{Profiles: &core.ClientCapabilityProfiles{Subtitles: []core.ClientSubtitleProfile{{Format: "webvtt", Method: "external"}}}}
 	info := ps.Info
 	info.Size = 1 << 30
-	info.Streams = append(info.Streams, core.StreamInfo{Index: 9, Type: "subtitle", Codec: "srt"}, core.StreamInfo{Index: 10, Type: "subtitle", Codec: "hdmv_pgs_subtitle"})
+	info.Streams = append(info.Streams, core.StreamInfo{Index: 9, Type: "subtitle", Codec: "srt"}, core.StreamInfo{Index: 10, Type: "subtitle", Codec: "hdmv_pgs_subtitle"}, core.StreamInfo{Index: 12, Type: "subtitle", Codec: "ass"}, core.StreamInfo{Index: 13, Type: "subtitle", Codec: "ssa"}, core.StreamInfo{Index: 14, Type: "subtitle", Codec: "mov_text"})
 	if len(progressiveTextTracks("vela", caps, info)) != 0 {
 		t.Fatal("ordinary text support disabled direct play")
 	}
 	caps.Profiles.Subtitles[0].Format = "ether-vtt-window"
+	b.sessions[s.ID].caps = caps
+	for _, track := range info.Streams {
+		if track.Type == "subtitle" && track.Index != 10 && !b.progressiveSubtitle(b.sessions[s.ID], info, track) {
+			t.Fatalf("text codec lost cue delivery: %s", track.Codec)
+		}
+	}
 	tracks := progressiveTextTracks("vela", caps, info)
-	if len(tracks) != 1 || tracks[0] != 9 {
+	if len(tracks) != 4 || tracks[0] != 9 {
 		t.Fatal("cue tee includes image subtitles or omitted explicit text capability", tracks)
 	}
 }
