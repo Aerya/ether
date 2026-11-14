@@ -487,6 +487,7 @@ export const tv = {
       filter?: string;
       source?: string;
       group?: string;
+      sort?: string;
     },
     signal?: AbortSignal,
   ) => {
@@ -497,6 +498,7 @@ export const tv = {
     if (q.filter) p.set("filter", q.filter);
     if (q.source) p.set("source", q.source);
     if (q.group) p.set("group", q.group);
+    if (q.sort) p.set("sort", q.sort);
     return apiFetch<ChannelPage>(`/livetv/channels/page?${p}`, { signal });
   },
   channel: (id: string, signal?: AbortSignal) =>

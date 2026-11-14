@@ -71,6 +71,8 @@ type ChannelPageQuery struct {
 	Source string
 	// Group keeps only channels in this lineup group (exact name).
 	Group string
+	// Sort orders matching channels by "number", "name", "id", or "default".
+	Sort string
 }
 
 type ChannelPage struct {
@@ -321,6 +323,29 @@ func (s *Service) ChannelPage(ctx context.Context, q ChannelPageQuery) (ChannelP
 		if channelMatches(c, q, stats) {
 			order = append(order, i)
 		}
+	}
+	switch q.Sort {
+	case "number":
+		sort.SliceStable(order, func(i, j int) bool {
+			a, b := all[order[i]], all[order[j]]
+			if cmp := a.numberKey.compare(b.numberKey); cmp != 0 {
+				return cmp < 0
+			}
+			return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+		})
+	case "name":
+		sort.SliceStable(order, func(i, j int) bool {
+			a, b := all[order[i]], all[order[j]]
+			na, nb := strings.ToLower(a.Name), strings.ToLower(b.Name)
+			if na != nb {
+				return na < nb
+			}
+			return a.numberKey.compare(b.numberKey) < 0
+		})
+	case "id":
+		sort.SliceStable(order, func(i, j int) bool {
+			return all[order[i]].ID < all[order[j]].ID
+		})
 	}
 	start := min(q.Offset, len(order))
 	end := min(start+q.Limit, len(order))
