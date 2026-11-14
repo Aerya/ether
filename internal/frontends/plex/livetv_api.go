@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -704,6 +705,7 @@ func (s *Server) liveTVHubProjection(r *http.Request) (*model.Hub, frontend.Row)
 	if len(md) == 0 {
 		return nil, frontend.Row{}
 	}
+	sortMetadataByVCN(md)
 	if len(md) > 24 {
 		md = md[:24]
 	}
@@ -775,6 +777,42 @@ func (s *Server) handleLiveHubs(w http.ResponseWriter, r *http.Request) {
 	s.write(w, r, mc)
 }
 
+func compareChannelNum(a, b string) bool {
+	na, erra := strconv.ParseFloat(strings.TrimSpace(a), 64)
+	nb, errb := strconv.ParseFloat(strings.TrimSpace(b), 64)
+	if erra == nil && errb == nil && na != nb {
+		return na < nb
+	}
+	if (erra == nil) != (errb == nil) {
+		return erra == nil
+	}
+	return a < b
+}
+
+func metadataChannelVCN(md model.Metadata) string {
+	for _, m := range md.Media {
+		for _, a := range m.Extra {
+			if a.Name == "channelVcn" {
+				if v, ok := a.Value.(string); ok {
+					return v
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func sortMetadataByVCN(items []model.Metadata) {
+	sort.SliceStable(items, func(i, j int) bool {
+		vi := metadataChannelVCN(items[i])
+		vj := metadataChannelVCN(items[j])
+		if vi != vj {
+			return compareChannelNum(vi, vj)
+		}
+		return items[i].Title < items[j].Title
+	})
+}
+
 func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 	if !s.liveTVEnabled() {
 		return nil
@@ -792,6 +830,17 @@ func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 	for _, c := range cs {
 		byID[c.ID] = c
 	}
+	sort.SliceStable(ps, func(i, j int) bool {
+		ci, oki := byID[ps[i].ChannelID]
+		cj, okj := byID[ps[j].ChannelID]
+		if oki != okj {
+			return oki
+		}
+		if oki && ci.Number != cj.Number {
+			return compareChannelNum(ci.Number, cj.Number)
+		}
+		return ps[i].Start.Before(ps[j].Start)
+	})
 	cloudLogo := cloudGuideLogoClient(FromContext(r.Context()))
 	toMeta := func(p frontend.LiveTVProgramme) (model.Metadata, bool) {
 		c, ok := byID[p.ChannelID]
