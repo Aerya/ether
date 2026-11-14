@@ -231,7 +231,7 @@ export default function LiveTV() {
   const [filter, setFilter] = useState<Filter>("live");
   // One lineup group (exact name); empty shows every group.
   const [group, setGroup] = useState("");
-  const [channelSort, setChannelSort] = useState<"number" | "name" | "id" | "default">("number");
+  const [channelSort, setChannelSort] = useState<"number" | "name" | "id" | "source">("number");
   const [inspected, setInspected] = useState<InspectedProgramme | null>(null);
   const [inspectOpen, setInspectOpen] = useState(false);
   const [previewChannel, setPreviewChannel] = useState<Channel | null>(null);
@@ -870,7 +870,7 @@ export default function LiveTV() {
                       { value: "number", label: t("Channel #") },
                       { value: "name", label: t("Channel Name") },
                       { value: "id", label: t("Channel ID") },
-                      { value: "default", label: t("Default") },
+                      { value: "source", label: t("Source") },
                     ]}
                     menuClassName="w-40"
                   />

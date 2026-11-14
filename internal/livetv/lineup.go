@@ -148,11 +148,11 @@ func (s *Service) channelSummaries(ctx context.Context) ([]ChannelSummary, error
 		if ar != br {
 			return ar < br
 		}
-		if a.SourceID != b.SourceID {
-			return a.SourceID < b.SourceID
-		}
 		if cmp := a.numberKey.compare(b.numberKey); cmp != 0 {
 			return cmp < 0
+		}
+		if a.SourceID != b.SourceID {
+			return a.SourceID < b.SourceID
 		}
 		return a.ID < b.ID
 	})
@@ -325,13 +325,21 @@ func (s *Service) ChannelPage(ctx context.Context, q ChannelPageQuery) (ChannelP
 		}
 	}
 	switch q.Sort {
-	case "number":
+	case "", "number":
 		sort.SliceStable(order, func(i, j int) bool {
 			a, b := all[order[i]], all[order[j]]
 			if cmp := a.numberKey.compare(b.numberKey); cmp != 0 {
 				return cmp < 0
 			}
 			return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+		})
+	case "source":
+		sort.SliceStable(order, func(i, j int) bool {
+			a, b := all[order[i]], all[order[j]]
+			if a.SourceID != b.SourceID {
+				return a.SourceID < b.SourceID
+			}
+			return a.numberKey.compare(b.numberKey) < 0
 		})
 	case "name":
 		sort.SliceStable(order, func(i, j int) bool {
