@@ -3,6 +3,7 @@ package plex
 import (
 	"context"
 	"encoding/base64"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -402,6 +403,10 @@ func (s *Server) handlePhotoTranscode(w http.ResponseWriter, r *http.Request) {
 		s.serveRemoteImage(w, r, resizeTMDBURL(u.String(), width))
 		return
 	}
+	if u.IsAbs() && u.Scheme == "https" && s.liveTVExternalArtworkAllowed(r, u) {
+		s.serveRemoteImage(w, r, u.String())
+		return
+	}
 	// Android may wrap an artwork URL from a previous local/remote/relay
 	// connection. Resolve only known server artwork routes under the OUTER
 	// viewer; never dial that hostname or use credentials from the nested URL.
@@ -489,6 +494,32 @@ func (s *Server) isSelfHost(r *http.Request, host string) bool {
 	}
 	name = strings.Trim(name, "[]")
 	return name == "localhost" || name == "127.0.0.1" || name == "::1" || strings.HasSuffix(name, ".plex.direct")
+}
+
+func (s *Server) liveTVExternalArtworkAllowed(r *http.Request, u *url.URL) bool {
+	if !s.liveTVEnabled() || !s.svc().liveTV.VisibleTo(r.Context(), FromContext(r.Context()).User) {
+		return false
+	}
+	host := strings.ToLower(strings.Trim(u.Hostname(), "[]"))
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") || strings.HasSuffix(host, ".invalid") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()) {
+		return false
+	}
+	db := s.runtimeDB()
+	if db == nil {
+		return false
+	}
+	raw := u.String()
+	var exists int
+	if err := db.QueryRowContext(r.Context(), `SELECT 1 FROM livetv_programmes WHERE thumb = ? LIMIT 1`, raw).Scan(&exists); err == nil {
+		return true
+	}
+	if err := db.QueryRowContext(r.Context(), `SELECT 1 FROM livetv_channels WHERE logo = ? LIMIT 1`, raw).Scan(&exists); err == nil {
+		return true
+	}
+	return false
 }
 
 // allowedImageHost limits the proxy to the artwork CDN, so it is not an

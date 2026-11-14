@@ -161,6 +161,7 @@ type ProviderDirectory struct {
 	UpdatedAt  int64  `plex:"updatedAt,omitempty"`
 	ScannedAt  int64  `plex:"scannedAt,omitempty"`
 	Icon       string `plex:"icon,omitempty"`
+	Context    string `plex:"context,omitempty"`
 
 	Pivot []Pivot `plex:"Pivot"`
 }
@@ -638,7 +639,8 @@ type GridChannelFilter struct {
 }
 
 type Feature struct {
-	GridChannelFilter []GridChannelFilter `plex:"GridChannelFilter"`
+	PromotedGridChannelFilter []GridChannelFilter `plex:"PromotedGridChannelFilter"`
+	GridChannelFilter         []GridChannelFilter `plex:"GridChannelFilter"`
 	Flavor            string              `plex:"flavor,omitempty"`
 	ScrobbleKey       string              `plex:"scrobbleKey,omitempty"`
 	UnscrobbleKey     string              `plex:"unscrobbleKey,omitempty"`
