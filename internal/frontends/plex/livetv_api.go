@@ -91,21 +91,23 @@ func (s *Server) liveTVProvider(ctx context.Context, u *frontend.User) *model.Me
 		{
 			Type: "content",
 			Key:  liveProviderPath,
+			// Mirrors the official Plex Live TV provider (epg.provider.plex.tv):
+			// a keyless "home" directory whose pivots drive the source. Native
+			// apps open a keyed directory as a plain channel list and hide the
+			// Guide / What's On pivots, category pills and Featured filter.
 			Directory: []model.ProviderDirectory{{
-				ID:      "livetv",
-				Key:     liveProviderPath + "/lineups/dvr/channels",
-				HubKey:  liveProviderPath + "/hubs",
+				ID:      "home",
 				Title:   "Live TV",
-				Type:    "livetv",
+				Type:    "episode",
 				Context: "content.home",
 				Pivot: []model.Pivot{
-					{ID: "epg.whatson", Key: liveProviderPath + "/hubs/sections/home", Type: "hub", Title: "What's On", Context: "content.home", Symbol: "star"},
 					{ID: "epg.guide", Key: "view://dvr/guide", Type: "view", Title: "Guide", Context: "content.dvr.guide", Symbol: "guide"},
+					{ID: "epg.whatson", Key: liveProviderPath + "/hubs/sections/home", Type: "hub", Title: "What's On", Context: "content.home", Symbol: "star"},
 				},
 			}},
 		},
 		{Type: "universalsearch", Key: liveProviderPath + "/library/search"},
-		{Type: "grid", Key: liveProviderPath + "/grid", GridChannelFilter: filters},
+		{Type: "grid", Key: liveProviderPath + "/grid", PromotedGridChannelFilter: []model.GridChannelFilter{{Identifier: "featured", Key: liveProviderPath + "/lineups/dvr/channels/featured", Title: "Featured"}}, GridChannelFilter: filters},
 		{Type: "metadata", Key: liveProviderPath + "/metadata"},
 		{Type: "livetv", Key: "/livetv/dvrs"},
 		{Type: "promoted", Key: liveProviderPath + "/hubs/promoted"},
@@ -157,6 +159,7 @@ func (s *Server) registerLiveTVRoutes(r chi.Router) {
 		get(path, s.handleLiveChannels)
 	}
 	get(liveProviderPath, s.handleLiveRoot)
+	get(liveProviderPath+"/lineups/dvr/channels/featured", s.handleLiveChannels)
 	get(liveProviderPath+"/guides/{guide}/channels", s.handleLiveChannels)
 	get(liveProviderPath+"/categories/{category}/channels", s.handleLiveChannels)
 	get(liveProviderPath+"/grid", s.handleLiveGuide)
