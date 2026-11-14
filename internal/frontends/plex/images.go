@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -497,7 +498,8 @@ func (s *Server) isSelfHost(r *http.Request, host string) bool {
 }
 
 func (s *Server) liveTVExternalArtworkAllowed(r *http.Request, u *url.URL) bool {
-	if !s.liveTVEnabled() || !s.svc().liveTV.VisibleTo(r.Context(), FromContext(r.Context()).User) {
+	user := FromContext(r.Context()).User
+	if !s.liveTVEnabled() || !s.svc().liveTV.VisibleTo(r.Context(), user) {
 		return false
 	}
 	host := strings.ToLower(strings.Trim(u.Hostname(), "[]"))
@@ -507,17 +509,21 @@ func (s *Server) liveTVExternalArtworkAllowed(r *http.Request, u *url.URL) bool 
 	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()) {
 		return false
 	}
-	db := s.runtimeDB()
-	if db == nil {
-		return false
-	}
 	raw := u.String()
-	var exists int
-	if err := db.QueryRowContext(r.Context(), `SELECT 1 FROM livetv_programmes WHERE thumb = ? LIMIT 1`, raw).Scan(&exists); err == nil {
-		return true
+	if cs, err := s.svc().liveTV.AllowedChannels(r.Context(), user); err == nil {
+		for _, c := range cs {
+			if c.Logo == raw {
+				return true
+			}
+		}
 	}
-	if err := db.QueryRowContext(r.Context(), `SELECT 1 FROM livetv_channels WHERE logo = ? LIMIT 1`, raw).Scan(&exists); err == nil {
-		return true
+	now := s.now()
+	if ps, err := s.svc().liveTV.GuideWindow(r.Context(), user, now.Add(-12*time.Hour), now.Add(48*time.Hour)); err == nil {
+		for _, p := range ps {
+			if p.Item.Thumb == raw {
+				return true
+			}
+		}
 	}
 	return false
 }
