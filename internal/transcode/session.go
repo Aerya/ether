@@ -25,6 +25,8 @@ import (
 // track per representation (video, audio); ffmpeg's dash muxer writes short
 // chunks that the session regroups into numbered segments by timestamp.
 type Session struct {
+	// Explicit quality sessions retire the old run before starting a rung.
+	serialRungs             bool
 	diagnosticsEnabled      bool
 	preparation             []core.HLSPreparationEvent
 	diagnosticRecords       []core.HLSDiagnosticRecord

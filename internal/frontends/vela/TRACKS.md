@@ -29,3 +29,39 @@ Original-file embedded delivery is offered only for explicitly declared source
 subtitle codecs. Unsupported original text is omitted while its only possible
 external URL would need an inactive HLS cue tee; it appears as external WebVTT
 when fallback activates. Burn-in always means actual image subtitle burn-in.
+
+File quality choices use the same broker ladder for direct-file, remux and
+transcode starts. `primary` is the starting route (the menu's Original choice);
+only actual original-file delivery carries `original:true`. Lower paths are
+`quality-<rung ID>` with optional `quality:{width,height,bitrate}` target metadata
+(bits/second). They are URL-less/on-demand until selected. The canonical Vela
+protocol addition is d33421a. No label or decoder claim should be inferred from
+an ID. The playback lead and protocol owner agreed these fields directly.
+
+`switch` at absolute title seconds preserves position and advances both source
+and seek generations. Actual HLS qualities remain real broker rendition URLs,
+with pending/empty codecs until init bytes prove them. A prepared switch retains
+the prepared timeline origin. Seek/track restarts invalidate prepared paths.
+Original-file URLs stay ready and range-authorized while HLS is prepared/played.
+
+`prepare-fallback` with positive maxBitrate selects the highest allowed lower rung
+whose peak bitrate fits the limit, requests a bounded media range on the existing
+ladder, and reports ready only after publication. It leaves the selected path and
+generations unchanged. The host advertises proactiveFallback only through the
+optional broker quality service backed by the local manager; unsupported hosts
+keep it false. Capacity is still checked on actual output activation. Explicit
+quality sessions retire the old run before starting a replacement, so the ladder
+has one encoder at a time. Other surfaces retain their existing behavior.
+
+Coordinator lab checks (no deployment/streaming performed by this worker):
+- 1917 primary H264-copy/AAC remux: menu shows Original first plus lower choices;
+  opening the session and fetching metadata starts no unused encoder.
+- Choose 720p at a nonzero position, then Original; verify position/audio/subtitle
+  selection and source/seek generations, including subsequent seek/track changes.
+- While Original plays, prepare-fallback at 2000000 bits/second; selected path and
+  generations stay unchanged, fallback becomes ready only with a real segment;
+  switching to its path reuses the prepared origin and output.
+- Observe process/admission diagnostics: at most one active encoder, repeated
+  prepare reuses cached output, stop cleans up. Check MSE and native HLS Auto.
+- Repeat with original-file and transcode starts, allowTranscode=false (Original
+  only), constrained decoder/size/bitrate caps, and exhausted encoder capacity.

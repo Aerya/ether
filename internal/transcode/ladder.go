@@ -1,7 +1,9 @@
 package transcode
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -412,3 +414,77 @@ func dashRepsLadder(info core.MediaInfo, primary core.Decision, rungs []rung) []
 
 var _ core.HLSLadderSession = (*Session)(nil)
 var _ core.GoodputSession = (*Session)(nil)
+
+// QualityRungs plans the same ladder used at startup, with no process or IO work.
+func QualityRungs(info core.MediaInfo, decision core.Decision, codecs []string, maxWidth, maxHeight, maxKbps int) []core.HLSRung {
+	var out []core.HLSRung
+	for _, r := range buildRungs(info, decision, adaptiveSettings{Ladder: true, LadderUnderCopy: true})[1:] {
+		allowed := false
+		for _, codec := range codecs {
+			if codec == r.decision.VideoCodec {
+				allowed = true
+			}
+		}
+		if !allowed || (maxWidth > 0 && r.width > maxWidth) || (maxHeight > 0 && r.height > maxHeight) || (maxKbps > 0 && r.peakKbps > maxKbps) {
+			continue
+		}
+		out = append(out, core.HLSRung{ID: r.id, Width: r.width, Height: r.height, Bandwidth: r.peakKbps * 1000, AverageBandwidth: r.avgKbps * 1000})
+	}
+	return out
+}
+
+// PrepareRung requests the existing ladder's segment; it creates no parallel encoder.
+func (s *Session) PrepareRung(ctx context.Context, id string, position time.Duration) error {
+	s.mu.Lock()
+	t := s.rungTrack(id)
+	n := 0
+	if s.plan != nil {
+		n = s.plan.IndexAt(position - s.base)
+	}
+	s.mu.Unlock()
+	if t < 0 {
+		return core.ErrNotAvailable
+	}
+	w := &preparationSink{header: make(http.Header)}
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/prepare", nil)
+	if err != nil {
+		return err
+	}
+	// A one-byte GET activates the lazy rung and waits for real publication.
+	r.Header.Set("Range", "bytes=0-0")
+	s.serveSegment(w, r, t, n)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if w.status >= 400 || !w.wrote {
+		return core.ErrNotAvailable
+	}
+	return nil
+}
+
+type preparationSink struct {
+	header http.Header
+	status int
+	wrote  bool
+}
+
+func (w *preparationSink) Header() http.Header         { return w.header }
+func (w *preparationSink) WriteHeader(n int)           { w.status = n; w.wrote = true }
+func (w *preparationSink) Write(p []byte) (int, error) { w.wrote = true; return io.Discard.Write(p) }
+
+func (m *Manager) ProactiveFallbackAvailable() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return !m.closed
+}
+func QualityDecision(info core.MediaInfo, base core.Decision, id string) (core.Decision, bool) {
+	for _, r := range buildRungs(info, base, adaptiveSettings{Ladder: true, LadderUnderCopy: true})[1:] {
+		if r.id == id {
+			return r.decision, true
+		}
+	}
+	return core.Decision{}, false
+}

@@ -725,6 +725,9 @@ const (
 // StreamRequest describes output, not an upstream URL or credential. The
 // broker owns the input, decision and stream grant.
 type StreamRequest struct {
+	// PrepareOnly keeps original-file delivery authorized while preparing HLS.
+	PrepareOnly bool
+
 	// Track changes are source stream indices, validated before output restart.
 	AudioStream, SubtitleStream *int
 	// LazyStart leaves the encoder idle until a rendition is requested.
@@ -1006,4 +1009,12 @@ type FilterFacetReader interface {
 // StreamDecisionReader returns the admitted decision after an authorized restart.
 type StreamDecisionReader interface {
 	StreamDecision(context.Context, SessionAccess, string) (core.Decision, error)
+}
+
+// QualitySessions offers lazy variants of the pinned file using the broker ladder.
+// Preparation returns only after a real media segment has been published.
+type QualitySessions interface {
+	ProactiveFallbackAvailable() bool
+	QualityRungs(context.Context, SessionAccess, string) ([]HLSRung, error)
+	PrepareQuality(context.Context, SessionAccess, string, string, time.Duration) (string, time.Duration, error)
 }

@@ -74,7 +74,7 @@ func TestOriginalPlaybackContract(t *testing.T) {
 	if w.Code != 200 || len(starts) != 2 || starts[1].Position != 456*time.Second || starts[1].Format != frontend.StreamHLS || !starts[1].LazyStart || !starts[1].Continuous {
 		t.Fatalf("fallback switch %d %s %+v", w.Code, w.Body.String(), starts)
 	}
-	if paths[1]["timelineOriginSeconds"] != 456.0 || plan["sourceGeneration"] != uint64(1) || plan["seekGeneration"] != uint64(2) || paths[0]["url"] != nil {
+	if paths[1]["timelineOriginSeconds"] != 456.0 || plan["sourceGeneration"] != uint64(2) || plan["seekGeneration"] != uint64(2) || paths[0]["url"] == nil {
 		t.Fatalf("timeline/source changed %+v", plan)
 	}
 	qualities := paths[1]["qualities"].([]object)

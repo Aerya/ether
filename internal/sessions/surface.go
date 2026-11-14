@@ -804,3 +804,22 @@ func (s surface) StopAudioFallback(ctx context.Context, a frontend.SessionAccess
 	}
 	return service.StopAudioFallback(ctx, a, id, audioID)
 }
+
+func (s surface) ProactiveFallbackAvailable() bool {
+	q, ok := s.broker.(frontend.QualitySessions)
+	return s.protocol == "vela" && ok && q.ProactiveFallbackAvailable()
+}
+func (s surface) QualityRungs(ctx context.Context, a frontend.SessionAccess, id string) ([]core.HLSRung, error) {
+	q, ok := s.broker.(frontend.QualitySessions)
+	if !ok || a.Protocol != s.protocol {
+		return nil, core.ErrNotAvailable
+	}
+	return q.QualityRungs(ctx, a, id)
+}
+func (s surface) PrepareQuality(ctx context.Context, a frontend.SessionAccess, id, rung string, pos time.Duration) (string, time.Duration, error) {
+	q, ok := s.broker.(frontend.QualitySessions)
+	if !ok || a.Protocol != s.protocol {
+		return "", 0, core.ErrNotAvailable
+	}
+	return q.PrepareQuality(ctx, a, id, rung, pos)
+}

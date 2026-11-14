@@ -44,6 +44,9 @@ func (b *Broker) StartStream(ctx context.Context, a frontend.SessionAccess, id s
 	if (req.AudioStream != nil || req.SubtitleStream != nil) && req.Format != frontend.StreamHLS && req.Format != frontend.StreamDASH {
 		return "", core.ErrNotAvailable
 	}
+	if req.PrepareOnly && (a.Protocol != "vela" || req.Format != frontend.StreamHLS) {
+		return "", core.ErrNotAvailable
+	}
 	if req.Position < 0 || req.SegmentDuration < 0 {
 		return "", core.ErrNotAvailable
 	}
@@ -161,8 +164,15 @@ func (b *Broker) StartStream(ctx context.Context, a frontend.SessionAccess, id s
 		return "", core.ErrNotAvailable
 	}
 	tracksChanged := req.AudioStream != nil || req.SubtitleStream != nil
-	if !tracksChanged && s.format == req.Format && s.streamPosition == req.Position && s.segmentDuration == req.SegmentDuration {
+	if !tracksChanged && (s.format == req.Format || (s.public.Protocol == "vela" && s.format == frontend.StreamDirect)) && s.streamPosition == req.Position && s.segmentDuration == req.SegmentDuration {
 		if hs, ok := b.transcodeSession(id); ok && hs != nil {
+			if !req.PrepareOnly && s.format != req.Format {
+				b.mu.Lock()
+				if live := b.sessions[id]; live != nil {
+					live.format = req.Format
+				}
+				b.mu.Unlock()
+			}
 			if entry, ok := b.bindings.Get(id); ok && entry.Started {
 				b.recordPlaybackDecision(s.playID, entry.Decision)
 			}
@@ -238,8 +248,17 @@ func (b *Broker) StartStream(ctx context.Context, a frontend.SessionAccess, id s
 	if dec.Kind == core.DecisionRemux && !s.opts.DirectStream {
 		return "", core.ErrNotAvailable
 	}
-	b.transcodeStop(id)
 	request := core.HLSRequest{LazyStart: req.LazyStart, Diagnostics: req.Continuous, Continuous: req.Continuous, RequireIndependentProof: b.policy(s.public.Protocol).DistributedBindings, SessionID: id, ReleaseID: ps.SourceReleaseID(), InputURL: b.deps.Playback.InputURL(s.playID), Info: ps.Info, Decision: dec, StartOffset: req.Position, SegmentDuration: req.SegmentDuration, Protocol: proto}
+	if req.Continuous && s.public.Protocol == "vela" {
+		rungs, e := b.qualityRungs(ctx, s, viewer)
+		if e != nil {
+			return "", e
+		}
+		request.QualityRungs = true
+		for _, rung := range rungs {
+			request.QualityRungIDs = append(request.QualityRungIDs, rung.ID)
+		}
+	}
 	if req.Continuous {
 		// A continuous playback client declares its decoder set. Optional
 		// encoded rungs must also respect its session's transcoding policy.
@@ -252,9 +271,10 @@ func (b *Broker) StartStream(ctx context.Context, a frontend.SessionAccess, id s
 	if len(request.TextSubtitleStreams) > 0 {
 		request.TextSubtitleSource = sourceRevision(ps)
 	}
+	b.transcodeStop(id)
 	var hs core.HLSSession
 	var lease core.EncoderInputLease
-	if remote := b.deps.DistributedHLS; remote != nil && len(request.TextSubtitleStreams) == 0 && remote.Supports(request) {
+	if remote := b.deps.DistributedHLS; remote != nil && !request.QualityRungs && len(request.TextSubtitleStreams) == 0 && remote.Supports(request) {
 		hs, err = remote.StartDistributedHLS(context.WithoutCancel(ctx), viewer.ID, s.playID, sourceRevision(ps), request)
 	} else {
 		if remote := b.deps.DistributedHLS; remote != nil && remote.Allocated(id) {
@@ -308,7 +328,9 @@ func (b *Broker) StartStream(ctx context.Context, a frontend.SessionAccess, id s
 	}
 	b.mu.Lock()
 	if live := b.sessions[id]; live != nil {
-		live.format = req.Format
+		if !req.PrepareOnly || live.format != frontend.StreamDirect {
+			live.format = req.Format
+		}
 		live.streamPosition = req.Position
 		live.segmentDuration = req.SegmentDuration
 		if tracksChanged {
@@ -594,7 +616,7 @@ func (b *Broker) serveMediaAt(protocol frontend.Protocol, access *frontend.Sessi
 		b.serveSubtitle(w, r, s, tail[1])
 		return
 	}
-	if len(tail) == 1 && tail[0] == "file" && s.format == frontend.StreamDirect {
+	if len(tail) == 1 && tail[0] == "file" && (s.format == frontend.StreamDirect || (s.public.Protocol == "vela" && (s.opts.DirectPlay || s.opts.DirectStream))) {
 		if s.decision.Reason == "original_runtime" {
 			policy, _ := core.RangeResponseFrom(r.Context())
 			policy.StrictRanges = true
@@ -613,7 +635,7 @@ func (b *Broker) serveMediaAt(protocol frontend.Protocol, access *frontend.Sessi
 		http.NotFound(w, r)
 		return
 	}
-	if s.format == frontend.StreamHLS {
+	if s.format == frontend.StreamHLS || (s.public.Protocol == "vela" && s.format == frontend.StreamDirect) {
 		if len(tail) == 1 && tail[0] == "master.m3u8" {
 			b.serveMaster(w, r, s, hs)
 			return

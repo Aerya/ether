@@ -32,6 +32,7 @@ type client struct {
 	HDR              []string                               `json:"hdr,omitempty"`
 }
 type playSession struct {
+	qualityRungs      map[string]string
 	scope             string
 	media             frontend.MediaInfo
 	subtitleFormats   []string
@@ -305,6 +306,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	if transport == "hls" {
 		i.refreshTrackDelivery(r.Context(), i.access(r, v), s.ID, ps)
 	}
+	i.addQualityPaths(r.Context(), i.access(r, v), s.ID, ps)
 	i.refreshOutput(r.Context(), s.ID, ps)
 	i.mu.Lock()
 	for id, old := range i.sessions {
@@ -398,6 +400,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 	}
 	var b struct {
 		Kind, PathID, AudioTrackID       string
+		MaxBitrate                       int
 		AtSeconds                        *float64
 		SubtitleTrackID                  json.RawMessage
 		PositionSeconds                  float64
@@ -429,6 +432,10 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		}
 		s.ended = time.Now()
 		s.plan["state"] = "ended"
+	case "prepare-fallback":
+		if !i.prepareFallback(w, r, v, s, id, b.MaxBitrate) {
+			return
+		}
 	case "switch":
 		pos, ok := seconds(b.PositionSeconds)
 		if b.AtSeconds != nil {
@@ -451,25 +458,44 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		path := paths[selected]
+		if rung := s.rungFor(path); rung != "" {
+			if !i.qualityAllowed(r.Context(), i.access(r, v), id, rung) {
+				problem(w, 403, "policy", "quality_unavailable")
+				return
+			}
+		}
 		format := frontend.StreamDirect
 		if path["transport"] == "hls" {
 			format = frontend.StreamHLS
 		}
-		url, err := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: format, Position: pos, LazyStart: true, Continuous: true})
+		origin := pos
+		if fallback, ok := s.plan["fallback"].(object); ok && fallback["state"] == "ready" && fallback["pathId"] == b.PathID {
+			if at, ok := path["timelineOriginSeconds"].(float64); ok {
+				if prepared, valid := seconds(at); valid && prepared <= pos {
+					origin = prepared
+				}
+			}
+		}
+		url, err := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: format, Position: origin, LazyStart: true, Continuous: true})
 		if err != nil {
 			fail(w, err)
 			return
 		}
 		for _, previous := range paths {
-			if previous["id"] != b.PathID {
+			if previous["id"] != b.PathID && previous["original"] != true {
 				delete(previous, "url")
+				previous["qualities"] = []object{}
+				delete(previous, "initialRenditionId")
 				previous["readiness"] = "on-demand"
 			}
+		}
+		if rung := s.qualityRungs[b.PathID]; rung != "" {
+			url = strings.TrimSuffix(url, "master.m3u8") + rung + "/index.m3u8"
 		}
 		path["url"], path["readiness"] = url, "ready"
 		path["timelineOriginSeconds"] = float64(0)
 		if format == frontend.StreamHLS {
-			path["timelineOriginSeconds"] = pos.Seconds()
+			path["timelineOriginSeconds"] = origin.Seconds()
 		}
 		s.plan["selectedPathId"] = b.PathID
 		if format == frontend.StreamHLS {
@@ -477,7 +503,9 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		}
 		s.position = pos
 		s.retainDiagnostics()
+		s.source++
 		s.seek++
+		s.plan["fallback"] = object{"state": "idle"}
 		i.refreshOutput(r.Context(), id, s)
 	case "seek":
 		pos, ok := seconds(b.PositionSeconds)
@@ -496,9 +524,13 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 				fail(w, e)
 				return
 			}
+			if rung := s.rungFor(path); rung != "" {
+				url = strings.TrimSuffix(url, "master.m3u8") + rung + "/index.m3u8"
+			}
 			path["url"] = url
 			path["timelineOriginSeconds"] = pos.Seconds()
 		}
+		s.invalidatePrepared(path)
 		s.retainDiagnostics()
 		s.seek++
 		s.position = pos
@@ -570,6 +602,9 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		delete(path, "range")
 		delete(path, "originalVideo")
 		delete(path, "byteLength")
+		if rung := s.rungFor(path); rung != "" {
+			url = strings.TrimSuffix(url, "master.m3u8") + rung + "/index.m3u8"
+		}
 		path["url"], path["transport"], path["mimeType"] = url, "hls", "application/vnd.apple.mpegurl"
 		path["qualities"] = []object{}
 		path["timelineOriginSeconds"] = s.position.Seconds()
@@ -597,6 +632,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		if sub != nil {
 			s.plan["selectedSubtitleTrackId"] = subID
 		}
+		s.invalidatePrepared(path)
 		s.retainDiagnostics()
 		s.source++
 		s.seek++

@@ -25,6 +25,10 @@ type HLSRamp struct {
 }
 
 type HLSRequest struct {
+	// QualityRungs explicitly requests the lazy, policy-filtered file-session ladder.
+	QualityRungs   bool
+	QualityRungIDs []string
+
 	// LazyStart defers the first encoder until the client selects a rendition.
 	LazyStart bool
 	// LadderVideoCodecs restricts optional encoded rungs when non-nil.

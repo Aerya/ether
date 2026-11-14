@@ -473,3 +473,22 @@ func (s scorecardSessionWrapper) StopAudioFallback(ctx context.Context, a fronte
 	}
 	return audio.StopAudioFallback(ctx, a, id, audioID)
 }
+
+func (s scorecardSessionWrapper) ProactiveFallbackAvailable() bool {
+	quality, ok := s.embeddedScorecardSessions.(frontend.QualitySessions)
+	return ok && quality.ProactiveFallbackAvailable()
+}
+func (s scorecardSessionWrapper) QualityRungs(ctx context.Context, a frontend.SessionAccess, id string) ([]core.HLSRung, error) {
+	quality, ok := s.embeddedScorecardSessions.(frontend.QualitySessions)
+	if !ok {
+		return nil, core.ErrNotAvailable
+	}
+	return quality.QualityRungs(ctx, a, id)
+}
+func (s scorecardSessionWrapper) PrepareQuality(ctx context.Context, a frontend.SessionAccess, id, rung string, position time.Duration) (string, time.Duration, error) {
+	quality, ok := s.embeddedScorecardSessions.(frontend.QualitySessions)
+	if !ok {
+		return "", 0, core.ErrNotAvailable
+	}
+	return quality.PrepareQuality(ctx, a, id, rung, position)
+}

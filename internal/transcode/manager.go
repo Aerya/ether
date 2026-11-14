@@ -722,7 +722,7 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		return nil, err
 	}
 	healTimestamps := false
-	if !atCap && proto == core.ProtocolHLS && (d.Container == ContainerMPEGTS || d.Container == ContainerFMP4) {
+	if !(req.LazyStart && req.QualityRungs) && !atCap && proto == core.ProtocolHLS && (d.Container == ContainerMPEGTS || d.Container == ContainerFMP4) {
 		if damaged, heal := m.copyDamage(ctx, req, d, life); damaged {
 			healTimestamps = heal
 			d.Kind, d.VideoCopy, d.VideoCodec = core.DecisionTranscode, false, "h264"
@@ -744,7 +744,22 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 	if ValidCopyTimeline(req) {
 		adapt.FastStart, adapt.Governor, adapt.Ladder = false, false, false
 	}
+	if req.QualityRungs {
+		adapt.Ladder, adapt.LadderUnderCopy = true, true
+	}
 	rungs := buildRungs(req.Info, d, adapt)
+	if req.QualityRungs {
+		allowed := rungs[:1]
+		for _, rung := range rungs[1:] {
+			for _, id := range req.QualityRungIDs {
+				if rung.id == id {
+					allowed = append(allowed, rung)
+					break
+				}
+			}
+		}
+		rungs = allowed
+	}
 	if req.LadderVideoCodecs != nil {
 		allowed := rungs[:1]
 		for _, rung := range rungs[1:] {
@@ -951,6 +966,7 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		softSubtitleStream = &index
 	}
 	s := &Session{
+		serialRungs:             req.QualityRungs,
 		androidMatroskaHLS:      d.AndroidMatroskaHLS,
 		healTimestamps:          healTimestamps,
 		encoder:                 life,
