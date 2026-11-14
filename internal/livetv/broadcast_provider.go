@@ -91,8 +91,9 @@ const (
 )
 
 var (
-	errSteadyFirstFrame = errors.New("live input produced no picture in time")
-	errSteadyStarved    = errors.New("live input stopped delivering pictures")
+	errSteadyFirstFrame  = errors.New("live input produced no picture in time")
+	errSteadyStarved     = errors.New("live input stopped delivering pictures")
+	errSteadyChangeStorm = errors.New("live input repeatedly changed without delivering pictures")
 )
 
 func (p *providerBroadcastPlanner) plans(now time.Time) (broadcastPlan, *broadcastPlan) {
@@ -217,11 +218,14 @@ func (p *providerBroadcastPlanner) failed(err error) time.Time {
 		tapped = h.Kind == "ts"
 		failover = h.Failed
 	}
-	failover = failover || tapped && steadyFailover(err)
+	failover = failover || tapped && steadyFailover(err) || errors.Is(err, errSteadyChangeStorm)
+	at := p.ladder.failed(a.src.ID, err, aired, failover, sourceIDs(candidates), now)
+	if p.ladder.state(a.src.ID).parked.After(now) && changed {
+		err, changed, failover = errSteadyChangeStorm, false, true
+	}
 	if !changed {
 		p.s.recordSourceHealth(p.channel.ID, a.src, err, false)
 	}
-	at := p.ladder.failed(a.src.ID, err, aired, failover, sourceIDs(candidates), now)
 	if failover && p.ladder.next == a.src.ID {
 		// The tap gave up on this source and its readers ended: what it
 		// buffered has aired. Rejoin at the live edge rather than re-decode it.
@@ -286,7 +290,7 @@ func (p *providerBroadcastPlanner) open(ctx context.Context) (transcode.Decoder,
 			}
 			p.link = sb.link
 			p.ladder.opened(id, now)
-			decoder := p.wrap(ctx, src, nil, sb.adopt(), 0)
+			decoder := p.wrap(ctx, src, sb.link, sb.adopt(), 0)
 			p.attempt = &steadyAttempt{src: src, link: sb.link, decoder: decoder}
 			p.mu.Unlock()
 			for _, l := range retired {
@@ -516,6 +520,7 @@ type providerBroadcastDecoder struct {
 	cancel        context.CancelFunc
 	cur, cand     *decoderPump
 	lastCandidate time.Time
+	changeAired   int64 // aired ticks at the previous distinct change
 }
 
 func (d *providerBroadcastDecoder) Next(ctx context.Context) (transcode.RawFrame, error) {
