@@ -2322,6 +2322,16 @@ func regionTagConflicts(releaseTitle, wantTitle string, countries []string) bool
 // season pack gets a per-episode release ID: health, bad marks, pins and
 // cached bytes then apply to the episode file, not the whole pack.
 func withTarget(rel core.Release, sreq core.SearchRequest) core.Release {
+	if sreq.Type == core.TypeMovie {
+		target := core.ReleaseTarget{}
+		if rel.Target != nil {
+			target = *rel.Target
+		}
+		target.MovieTitles = append([]string{sreq.Title, sreq.OriginalTitle}, sreq.AlternativeTitles...)
+		target.MovieYear = sreq.Year
+		rel.Target = &target
+		return rel
+	}
 	if sreq.Type != core.TypeEpisode || sreq.Episode <= 0 {
 		return rel
 	}
