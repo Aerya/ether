@@ -58,6 +58,21 @@ func (b *Broker) progressiveSubtitle(s *brokerSession, info core.MediaInfo, stre
 	if stream.External || !transcode.IsTextSubtitle(stream.Codec) {
 		return false
 	}
+	if stream.Codec != "subrip" && stream.Codec != "srt" && stream.Codec != "webvtt" {
+		// Preserve the ordinary progressive renderer's delivery contract;
+		// additional converted text codecs require bounded VTT windows.
+		window := false
+		if s.caps.Profiles != nil {
+			for _, p := range s.caps.Profiles.Subtitles {
+				if p.Format == "ether-vtt-window" && strings.EqualFold(p.Method, "external") {
+					window = true
+				}
+			}
+		}
+		if !window {
+			return false
+		}
+	}
 	for _, index := range progressiveTextTracks(string(s.public.Protocol), s.caps, info) {
 		if index == stream.Index {
 			return true

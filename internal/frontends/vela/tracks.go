@@ -55,14 +55,10 @@ func (i *instance) playbackTracks(ctx context.Context, access frontend.SessionAc
 				continue
 			}
 			if original && strings.Contains(url, "ether_window=1") {
-				// Original delivery has no playback cue tee. A session track
-				// command must first activate HLS; its returned plan carries
-				// the external WebVTT delivery once that tee exists.
-				if !canBurn {
-					continue
-				}
-				t["delivery"] = object{"kind": "burn-in"}
-				break
+				// No active playback tee exists for the original. Offer this
+				// track after HLS activates, rather than claiming burn-in or
+				// exposing an unusable cue window.
+				continue
 			}
 			format := "webvtt"
 			if strings.Contains(url, "ether_window=1") {

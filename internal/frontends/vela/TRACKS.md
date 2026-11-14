@@ -24,3 +24,8 @@ using path.timelineOriginSeconds. Empty windows mean cues have not been publishe
 or there are no cues in that interval: retry while playback is interested (about
 one second is sufficient), cancel requests on generation changes, and fetch the
 next window before its end. Do not interpret empty windows as subtitle failure.
+
+Original-file embedded delivery is offered only for explicitly declared source
+subtitle codecs. Unsupported original text is omitted while its only possible
+external URL would need an inactive HLS cue tee; it appears as external WebVTT
+when fallback activates. Burn-in always means actual image subtitle burn-in.
