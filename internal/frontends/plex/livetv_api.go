@@ -658,10 +658,13 @@ func (s *Server) handleLiveRoot(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) handleLiveWatchNow(w http.ResponseWriter, r *http.Request) {
 	types := []model.MetaType{{Active: true, Key: liveProviderPath + "/watchnow/all", Title: "All Channels", Type: "mixed"}}
+	dirs := []model.Directory{{Key: liveProviderPath + "/watchnow/all", Title: "All Channels", Type: "mixed"}}
 	for _, c := range []struct{ id, title string }{{"movie", "Movies"}, {"sports", "Sports"}, {"news", "News"}, {"kids", "Kids"}, {"series", "TV Shows"}} {
-		types = append(types, model.MetaType{Key: liveProviderPath + "/watchnow/categories/" + c.id, Title: c.title, Type: "mixed"})
+		k := liveProviderPath + "/watchnow/categories/" + c.id
+		types = append(types, model.MetaType{Key: k, Title: c.title, Type: "mixed"})
+		dirs = append(dirs, model.Directory{Key: k, Title: c.title, Type: "mixed"})
 	}
-	s.write(w, r, &model.MediaContainer{Size: len(types), Identifier: frontend.LiveTVProvider, Type: types})
+	s.write(w, r, &model.MediaContainer{Size: len(types), Identifier: frontend.LiveTVProvider, Type: types, Directory: dirs})
 }
 func (s *Server) liveTVHub(r *http.Request) *model.Hub {
 	h, _ := s.liveTVHubProjection(r)

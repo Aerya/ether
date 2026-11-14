@@ -19,11 +19,17 @@ func (s *Server) liveGuideFilters(ctx context.Context, u *frontend.User) []model
 			return out
 		}
 		for _, g := range guides {
-			out = append(out, model.GridChannelFilter{Key: liveProviderPath + "/guides/" + url.PathEscape(g.ID) + "/channels", GenreRatingKey: "ether.guide." + g.ID, Title: g.Name})
+			out = append(out, model.GridChannelFilter{Identifier: "guide-" + g.ID, Key: liveProviderPath + "/guides/" + url.PathEscape(g.ID) + "/channels", GenreRatingKey: "ether.guide." + g.ID, Title: g.Name})
 		}
 	}
-	for _, c := range []struct{ id, title string }{{"movie", "Movies"}, {"sports", "Sports"}, {"news", "News"}, {"kids", "Kids"}, {"series", "TV Shows"}} {
-		out = append(out, model.GridChannelFilter{Key: liveProviderPath + "/categories/" + c.id + "/channels", GenreRatingKey: "ether.category." + c.id, Title: c.title})
+	for _, c := range []struct{ id, ident, title string }{
+		{"movie", "movies", "Movies"},
+		{"sports", "sports", "Sports"},
+		{"news", "news", "News"},
+		{"kids", "kids-family", "Kids"},
+		{"series", "series", "TV Shows"},
+	} {
+		out = append(out, model.GridChannelFilter{Identifier: c.ident, Key: liveProviderPath + "/categories/" + c.id + "/channels", GenreRatingKey: "ether.category." + c.id, Title: c.title})
 	}
 	return out
 }
