@@ -106,7 +106,7 @@ func (s *Server) liveTVProvider(ctx context.Context, u *frontend.User) *model.Me
 			}},
 		},
 		{Type: "universalsearch", Key: liveProviderPath + "/library/search"},
-		{Type: "grid", Key: liveProviderPath + "/grid", PromotedGridChannelFilter: filters, GridChannelFilter: filters},
+		{Type: "grid", Key: liveProviderPath + "/grid", GridChannelFilter: filters},
 		{Type: "metadata", Key: liveProviderPath + "/metadata"},
 		{Type: "livetv", Key: "/livetv/dvrs"},
 		{Type: "promoted", Key: liveProviderPath + "/hubs/promoted"},
