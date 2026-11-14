@@ -1,8 +1,13 @@
 package stream
 
 import (
+	"bytes"
+	"context"
 	"github.com/braedonsaunders/ether/internal/archive"
+	"github.com/braedonsaunders/ether/internal/core"
+	"github.com/braedonsaunders/ether/internal/debrid"
 	"github.com/braedonsaunders/ether/internal/nzb"
+	"io"
 	"testing"
 )
 
@@ -18,5 +23,35 @@ func TestMoviePackMembers(t *testing.T) {
 	}
 	if got := b.chooseMember(members[:2]); got != nil {
 		t.Fatalf("wrong collection member %+v", got)
+	}
+	for _, name := range []string{"movie.mkv", "odd.scene.name.mkv", "The Mummy Returns.mkv"} {
+		files := []archive.Member{{Name: name, Size: 5000}, {Name: "sample.mkv", Size: 100}, {Name: "extras/Deleted.mkv", Size: 200}}
+		if got := b.chooseMember(files); got == nil || got.Name != name {
+			t.Fatalf("single feature %s: %+v", name, got)
+		}
+	}
+}
+
+func TestMovieSingleNZBFeature(t *testing.T) {
+	for _, name := range []string{"movie.mkv", "odd.scene.name.mkv"} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeFetcher()
+			data := mkvBytes(71, 1200000)
+			raw := post(t, f, 100000, postFile{name: name, data: data}, postFile{name: "sample.mkv", data: mkvBytes(72, 100000)})
+			doc, err := debrid.EpisodeNZB(raw, &core.ReleaseTarget{MovieTitles: []string{"The Mummy"}, MovieYear: 1999})
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := newTestEngine(t, f, nil, Options{})
+			src, err := e.Open(context.Background(), "single", doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer src.Close()
+			got, err := io.ReadAll(io.NewSectionReader(src, 0, src.Size()))
+			if err != nil || !bytes.Equal(got, data) {
+				t.Fatalf("single movie %s: %v bytes=%d", name, err, len(got))
+			}
+		})
 	}
 }

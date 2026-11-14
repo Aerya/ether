@@ -68,7 +68,7 @@ func EpisodeNZB(data []byte, t *core.ReleaseTarget) ([]byte, error) {
 			return nil, err
 		}
 		out, ok := doc.SubsetMeta(func(f *nzb.File) bool {
-			return f.Info.Kind != nzb.KindVideo || movieFileMatches(f.Name, t)
+			return true // the engine arbitrates after learning the complete playable file list
 		}, map[string]string{nzb.MetaMovie: (nzb.MovieHint{Titles: t.MovieTitles, Year: t.MovieYear}).String()})
 		if !ok {
 			return nil, core.ErrWrongContent

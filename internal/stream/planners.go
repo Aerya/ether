@@ -547,6 +547,16 @@ func (b *builder) planZIP(ctx context.Context, vols []*postedFile) (*plan, error
 // never played in its place.
 func (b *builder) chooseMember(members []archive.Member) *archive.Member {
 	if movie, ok := b.rel.doc.MovieHint(); ok {
+		features := 0
+		for _, m := range members {
+			info := nzb.Classify(m.Name)
+			if !m.Dir && info.Kind == nzb.KindVideo && !info.Sample && !info.Extra {
+				features++
+			}
+		}
+		if features <= 1 {
+			return chooseMember(members)
+		}
 		var matching []archive.Member
 		for _, m := range members {
 			if releaseparse.MovieFileMatches(m.Name, movie.Titles, movie.Year) {

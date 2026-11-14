@@ -16,7 +16,7 @@ const debridPayloadPrefix = "ETHER-DEBRID/1\n"
 // payloadMatchesTitle verifies that a cached or resumed debrid payload's
 // chosen file path matches the requested episode.
 func payloadMatchesTitle(nzb []byte, title *core.Title) bool {
-	if title == nil || (title.Type != core.TypeEpisode && title.Type != core.TypeMovie) || !bytes.HasPrefix(nzb, []byte(debridPayloadPrefix)) {
+	if title == nil || title.Type != core.TypeEpisode || !bytes.HasPrefix(nzb, []byte(debridPayloadPrefix)) {
 		return true
 	}
 	var p struct {
@@ -25,10 +25,6 @@ func payloadMatchesTitle(nzb []byte, title *core.Title) bool {
 	}
 	if err := json.Unmarshal(nzb[len(debridPayloadPrefix):], &p); err != nil || p.Path == "" {
 		return true
-	}
-	if title.Type == core.TypeMovie {
-		titles := append([]string{title.Title, title.OriginalTitle}, title.AlternativeTitles...)
-		return releaseparse.MovieFileMatches(p.Path, titles, title.Year)
 	}
 	season, episode := title.Season, title.Episode
 	if title.Key.Kind() == core.KindEpisode {

@@ -681,6 +681,14 @@ func isExtra(p string) bool {
 // ChooseFile honors explicit plugin file selectors first, including non-video
 // files. Otherwise it picks the main video: the target episode or largest video.
 func ChooseFile(files []File, target *core.ReleaseTarget) (File, error) {
+	featureCount := 0
+	for _, f := range files {
+		if isVideo(f.Path) && !isExtra(f.Path) && f.Size > 0 {
+			featureCount++
+		}
+	}
+	movieMatches := func(f File) bool { return featureCount <= 1 || movieFileMatches(f.Path, target) }
+
 	if target != nil && (target.FileIndex != nil || target.ExactFile != "") {
 		matches := func(f File) bool {
 			want := strings.ReplaceAll(target.ExactFile, "\\", "/")
@@ -693,7 +701,7 @@ func ChooseFile(files []File, target *core.ReleaseTarget) (File, error) {
 				return File{}, fmt.Errorf("debrid: fileIndex %d outside file list of %d: %w", i, len(files), core.ErrWrongContent)
 			}
 			f := files[i]
-			if f.Size <= 0 || !matches(f) || !movieFileMatches(f.Path, target) {
+			if f.Size <= 0 || !matches(f) || !movieMatches(f) {
 				return File{}, fmt.Errorf("debrid: selected file is empty or does not match file: %w", core.ErrWrongContent)
 			}
 			return f, nil
@@ -701,7 +709,7 @@ func ChooseFile(files []File, target *core.ReleaseTarget) (File, error) {
 		var chosen File
 		count := 0
 		for _, f := range files {
-			if f.Size > 0 && matches(f) && movieFileMatches(f.Path, target) {
+			if f.Size > 0 && matches(f) && movieMatches(f) {
 				chosen = f
 				count++
 			}
@@ -723,7 +731,7 @@ func ChooseFile(files []File, target *core.ReleaseTarget) (File, error) {
 	var videos []File
 	identityMismatch := false
 	for _, f := range files {
-		if target != nil && (!fileCourMatchesTarget(f.Path, target) || !fileIdentityMatches(f, target)) {
+		if target != nil && (!movieMatches(f) || !fileCourMatchesTarget(f.Path, target) || !fileIdentityMatches(f, target)) {
 			identityMismatch = identityMismatch || (isVideo(f.Path) && !isExtra(f.Path) && f.Size > 0)
 			continue
 		}
@@ -965,7 +973,7 @@ func fileIdentityMatches(f File, target *core.ReleaseTarget) bool {
 		return true
 	}
 	if len(target.MovieTitles) > 0 {
-		return movieFileMatches(f.Path, target)
+		return true // movie identity is arbitrated only with the complete multi-file list
 	}
 	idMatch, idConflict := releaseparse.CompareTitleIDs(target.ReportedIDs, target.ExpectedIDs)
 	if idConflict {

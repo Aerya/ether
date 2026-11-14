@@ -247,7 +247,7 @@ func (b *builder) planFor(ctx context.Context, c candidate) (*plan, error) {
 	}
 	switch c.kind {
 	case nzb.KindVideo, nzb.KindISO:
-		if movie, ok := b.rel.doc.MovieHint(); ok && !releaseparse.MovieFileMatches(c.files[0].Name(), movie.Titles, movie.Year) {
+		if movie, ok := b.rel.doc.MovieHint(); ok && len(b.candidates(b.rel.files)) > 1 && !releaseparse.MovieFileMatches(c.files[0].Name(), movie.Titles, movie.Year) {
 			return nil, ErrNoPlayableFile
 		}
 		return b.planPlain(ctx, c.files[0])
