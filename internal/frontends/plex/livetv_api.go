@@ -91,18 +91,18 @@ func (s *Server) liveTVProvider(ctx context.Context, u *frontend.User) *model.Me
 		{
 			Type: "content",
 			Key:  liveProviderPath,
-			// Mirrors the official Plex Live TV provider (epg.provider.plex.tv):
-			// a keyless "home" directory whose pivots drive the source. Native
-			// apps open a keyed directory as a plain channel list and hide the
-			// Guide / What's On pivots, category pills and Featured filter.
+			// Plex Web needs the keyed "livetv" directory (id/key/hubKey/type)
+			// to list the server's Live TV & DVR source.
 			Directory: []model.ProviderDirectory{{
-				ID:      "home",
+				ID:      "livetv",
+				Key:     liveProviderPath + "/lineups/dvr/channels",
+				HubKey:  liveProviderPath + "/hubs",
 				Title:   "Live TV",
-				Type:    "episode",
+				Type:    "livetv",
 				Context: "content.home",
 				Pivot: []model.Pivot{
-					{ID: "epg.guide", Key: "view://dvr/guide", Type: "view", Title: "Guide", Context: "content.dvr.guide", Symbol: "guide"},
 					{ID: "epg.whatson", Key: liveProviderPath + "/hubs/sections/home", Type: "hub", Title: "What's On", Context: "content.home", Symbol: "star"},
+					{ID: "epg.guide", Key: "view://dvr/guide", Type: "view", Title: "Guide", Context: "content.dvr.guide", Symbol: "guide"},
 				},
 			}},
 		},
