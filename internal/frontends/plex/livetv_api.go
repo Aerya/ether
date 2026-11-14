@@ -86,6 +86,7 @@ func (s *Server) liveTVProvider(ctx context.Context, u *frontend.User) *model.Me
 	if !s.liveTVEnabled() || !s.svc().liveTV.VisibleTo(ctx, u) {
 		return nil
 	}
+	promotedFilters := s.livePromotedGuideFilters()
 	filters := s.liveGuideFilters(ctx, u)
 	return &model.MediaProvider{Extra: []model.Attr{model.A("id", 1), model.A("parentID", 1), model.A("providerIdentifier", "tv.plex.providers.epg.xmltv"), model.A("epgSource", "XMLTV")}, Identifier: frontend.LiveTVProvider, Title: "Live TV", Types: "video", Protocols: "livetv", Feature: []model.Feature{
 		{
@@ -101,12 +102,11 @@ func (s *Server) liveTVProvider(ctx context.Context, u *frontend.User) *model.Me
 				Pivot: []model.Pivot{
 					{ID: "epg.whatson", Key: liveProviderPath + "/hubs/sections/home", Type: "hub", Title: "What's On", Context: "content.home", Symbol: "star"},
 					{ID: "epg.guide", Key: "view://dvr/guide", Type: "view", Title: "Guide", Context: "content.dvr.guide", Symbol: "guide"},
-					{ID: "categories", Key: liveProviderPath + "/watchnow", Type: "list", Title: "Categories", Context: "content.categories", Symbol: "stack"},
 				},
 			}},
 		},
 		{Type: "universalsearch", Key: liveProviderPath + "/library/search"},
-		{Type: "grid", Key: liveProviderPath + "/grid", GridChannelFilter: filters},
+		{Type: "grid", Key: liveProviderPath + "/grid", PromotedGridChannelFilter: promotedFilters, GridChannelFilter: filters},
 		{Type: "metadata", Key: liveProviderPath + "/metadata"},
 		{Type: "livetv", Key: "/livetv/dvrs"},
 		{Type: "promoted", Key: liveProviderPath + "/hubs/promoted"},
@@ -384,7 +384,11 @@ func (s *Server) handleLiveChannels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if category := chi.URLParam(r, "category"); category != "" {
+	category := chi.URLParam(r, "category")
+	if category == "" {
+		category = strings.TrimSpace(r.URL.Query().Get("genre"))
+	}
+	if category != "" {
 		cs, err = s.liveCategoryChannels(r, cs, category)
 		if err != nil {
 			s.writeErr(w, r, err)
@@ -565,9 +569,17 @@ func (s *Server) liveGuideMetadataCapture(r *http.Request, captured *[]frontend.
 			byID[c.ID] = c
 		}
 	}
+	var category string
+	if rawCat := chi.URLParam(r, "category"); rawCat != "" {
+		var ok bool
+		category, ok = normalizeLiveCategory(rawCat)
+		if !ok {
+			return nil, frontend.ErrNotFound
+		}
+	}
 	out := []model.Metadata{}
 	for _, p := range ps {
-		if category := chi.URLParam(r, "category"); category != "" && !frontend.LiveCategory(p.Item.Genres, category, p.Item.MediaType) {
+		if category != "" && !frontend.LiveCategory(p.Item.Genres, category, p.Item.MediaType) {
 			continue
 		}
 		if id := chi.URLParam(r, "programme"); id != "" && p.ID != id {
@@ -587,6 +599,9 @@ func (s *Server) liveGuideMetadataCapture(r *http.Request, captured *[]frontend.
 		if captured != nil {
 			*captured = append(*captured, p)
 		}
+	}
+	if category != "" || strings.Contains(r.URL.Path, "/watchnow/") {
+		sortMetadataByVCN(out)
 	}
 	return out, nil
 }
@@ -652,7 +667,30 @@ func (s *Server) handleLiveGuide(w http.ResponseWriter, r *http.Request) {
 		writeHTTPError(w, 404)
 		return
 	}
-	s.write(w, r, &model.MediaContainer{Size: len(md), Identifier: frontend.LiveTVProvider, Metadata: md})
+	mc := &model.MediaContainer{Size: len(md), Identifier: frontend.LiveTVProvider, Metadata: md}
+	if strings.Contains(r.URL.Path, "/watchnow/") {
+		total := len(md)
+		lo, hi := 0, total
+		if pr.HasPage {
+			lo, hi = pr.window(total)
+		} else {
+			if raw := r.URL.Query().Get("offset"); raw != "" {
+				if n, parseErr := strconv.Atoi(raw); parseErr == nil && n > 0 {
+					lo = min(n, total)
+				}
+			}
+			if raw := r.URL.Query().Get("limit"); raw != "" {
+				if n, parseErr := strconv.Atoi(raw); parseErr == nil && n >= 0 {
+					hi = min(lo+n, total)
+				}
+			}
+		}
+		md = md[lo:hi]
+		mc.Metadata = md
+		mc.Size = len(md)
+		mc.SetPage(lo, total)
+	}
+	s.write(w, r, mc)
 }
 func (s *Server) handleLiveRoot(w http.ResponseWriter, r *http.Request) {
 	s.write(w, r, &model.MediaContainer{Size: 2, Identifier: frontend.LiveTVProvider, Directory: []model.Directory{{Key: liveProviderPath + "/lineups/dvr/channels", Title: "Guide", Type: "livetv"}, {Key: liveProviderPath + "/watchnow/all", Title: "On Now", Type: "mixed"}}})

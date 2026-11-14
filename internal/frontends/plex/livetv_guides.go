@@ -4,11 +4,51 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/braedonsaunders/ether/internal/frontend"
 	"github.com/braedonsaunders/ether/internal/frontends/plex/model"
 )
+
+func normalizeLiveCategory(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "movies", "movie":
+		return "movie", true
+	case "sports", "sport":
+		return "sports", true
+	case "news":
+		return "news", true
+	case "kids-family", "kids":
+		return "kids", true
+	case "entertainment", "series", "tv-shows", "bingeworthy":
+		return "series", true
+	default:
+		return "", false
+	}
+}
+
+func (s *Server) livePromotedGuideFilters() []model.GridChannelFilter {
+	cats := []struct {
+		ident string
+		title string
+	}{
+		{"movies", "Movies"},
+		{"sports", "Sports"},
+		{"news", "News"},
+		{"kids-family", "Kids & Family"},
+		{"entertainment", "Entertainment"},
+	}
+	out := make([]model.GridChannelFilter, 0, len(cats))
+	for _, c := range cats {
+		out = append(out, model.GridChannelFilter{
+			Identifier: c.ident,
+			Key:        liveProviderPath + "/lineups/dvr/channels?genre=" + c.ident,
+			Title:      c.title,
+		})
+	}
+	return out
+}
 
 func (s *Server) liveGuideFilters(ctx context.Context, u *frontend.User) []model.GridChannelFilter {
 	out := []model.GridChannelFilter{}
@@ -16,27 +56,17 @@ func (s *Server) liveGuideFilters(ctx context.Context, u *frontend.User) []model
 		guides, err := g.Guides(ctx, u)
 		if err != nil {
 			s.log.Warn("live guides unavailable", "error", err)
-			return out
+			return append(out, s.livePromotedGuideFilters()...)
 		}
 		for _, g := range guides {
 			out = append(out, model.GridChannelFilter{Identifier: "guide-" + g.ID, Key: liveProviderPath + "/guides/" + url.PathEscape(g.ID) + "/channels", GenreRatingKey: "ether.guide." + g.ID, Title: g.Name})
 		}
 	}
-	for _, c := range []struct{ id, ident, title string }{
-		{"movie", "movies", "Movies"},
-		{"sports", "sports", "Sports"},
-		{"news", "news", "News"},
-		{"kids", "kids-family", "Kids"},
-		{"series", "series", "TV Shows"},
-	} {
-		out = append(out, model.GridChannelFilter{Identifier: c.ident, Key: liveProviderPath + "/categories/" + c.id + "/channels", GenreRatingKey: "ether.category." + c.id, Title: c.title})
-	}
-	return out
+	return append(out, s.livePromotedGuideFilters()...)
 }
 func (s *Server) liveCategoryChannels(r *http.Request, cs []frontend.LiveTVChannel, category string) ([]frontend.LiveTVChannel, error) {
-	switch category {
-	case "movie", "series", "sports", "news", "kids":
-	default:
+	canonical, ok := normalizeLiveCategory(category)
+	if !ok {
 		return nil, frontend.ErrNotFound
 	}
 	ids := make([]string, 0, len(cs))
@@ -54,7 +84,7 @@ func (s *Server) liveCategoryChannels(r *http.Request, cs []frontend.LiveTVChann
 	}
 	matches := map[string]bool{}
 	for _, p := range ps {
-		if frontend.LiveCategory(p.Item.Genres, category, p.Item.MediaType) {
+		if frontend.LiveCategory(p.Item.Genres, canonical, p.Item.MediaType) {
 			matches[p.ChannelID] = true
 		}
 	}

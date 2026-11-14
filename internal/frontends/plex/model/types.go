@@ -635,7 +635,7 @@ type MediaProvider struct {
 type GridChannelFilter struct {
 	Identifier     string `plex:"identifier,omitempty"`
 	Key            string `plex:"key"`
-	GenreRatingKey string `plex:"genreRatingKey"`
+	GenreRatingKey string `plex:"genreRatingKey,omitempty"`
 	Title          string `plex:"title"`
 }
 
