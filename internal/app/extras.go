@@ -49,7 +49,9 @@ func (a *App) themeTitle(ctx context.Context, viewer *core.Viewer, key core.Rati
 		return nil, core.ErrNotFound
 	}
 	switch key.Kind() {
-	case core.KindShow, core.KindSeason, core.KindEpisode:
+	// Movies authorize optional empty theme listings too; the theme service
+	// only schedules audio for shows.
+	case core.KindMovie, core.KindShow, core.KindSeason, core.KindEpisode:
 	default:
 		return nil, core.ErrNotFound
 	}

@@ -23,7 +23,7 @@ type playbackTextSubtitles interface {
 }
 
 func progressiveTextTracks(protocol string, caps core.ClientCaps, info core.MediaInfo) []int {
-	if caps.Profiles == nil || (info.Size > 0 && info.Size <= 32<<20) {
+	if protocol == "plex" || caps.Profiles == nil || (info.Size > 0 && info.Size <= 32<<20) {
 		return nil
 	}
 	declared := false

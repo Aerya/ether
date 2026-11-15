@@ -135,6 +135,9 @@ func TestLiveTuneStartup(t *testing.T) {
 					}()
 				}
 				var first, third, cushion, picture time.Duration
+				// Observe beyond the producer's bounded startup deadline. Its
+				// startupUntil belongs to the frame goroutine; inspecting it
+				// here races with that goroutine clearing it.
 				for time.Since(origin) < 22*time.Second {
 					time.Sleep(10 * time.Millisecond)
 					synctest.Wait()
@@ -154,9 +157,6 @@ func TestLiveTuneStartup(t *testing.T) {
 						if frame.Video[0] == 90 && picture == 0 {
 							picture = elapsed
 						}
-					}
-					if cushion > 0 && picture > 0 && b.startupUntil.IsZero() {
-						break
 					}
 				}
 				if optimized {

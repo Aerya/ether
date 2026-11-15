@@ -28,8 +28,9 @@ func (s *Service) readyPeer(cands []candidate) int {
 }
 
 // validateReady races just the preferred release and its best cached peer.
-// Equal-ranked ready copies win immediately; a better score gets one short,
-// absolute budget (including discovery). Existing checks are reused exactly.
+// Equal-ranked ready copies win immediately; a better rank or an explicit
+// routing decision gets one short, absolute budget (including discovery).
+// Existing checks are reused exactly.
 func (s *Service) validateReady(ctx context.Context, cands []candidate, tr *Trace, peer int) (int, []byte, error) {
 	var owned candidateChecks
 	checks := [2]*candidateCheck{cands[0].prepared, cands[peer].prepared}
@@ -81,7 +82,15 @@ func (s *Service) validateReady(ctx context.Context, cands []candidate, tr *Trac
 	if gs := cands[0].graceStart; !gs.IsZero() && gs.Before(start) {
 		start = gs
 	}
-	timer := time.NewTimer(max(time.Until(start.Add(readySourceBudget)), 0))
+	budget := readySourceBudget
+	if cands[peer].rel.Score >= cands[0].rel.Score &&
+		!compareCandidates(cands[0], cands[peer]) && !cands[0].sourcePreferred {
+		// Give an equally ranked preferred check one scheduling turn. Otherwise
+		// a sub-millisecond cached answer can win before it even starts.
+		// Real network checks still let an equal peer win as soon as ready.
+		budget = 10 * time.Millisecond
+	}
+	timer := time.NewTimer(max(time.Until(start.Add(budget)), 0))
 	defer timer.Stop()
 	expired := false
 	done := [2]bool{}
@@ -119,7 +128,7 @@ func (s *Service) validateReady(ctx context.Context, cands []candidate, tr *Trac
 			return win(0)
 		}
 		if done[1] && checks[1].result.healthy && checks[1].result.err == nil &&
-			(done[0] || expired || cands[peer].rel.Score >= cands[0].rel.Score) {
+			(done[0] || expired) {
 			tr.Candidates[cands[peer].trace].Route = "verified cached peer ready; preferred source not ready within quality budget"
 			keepFallback = true
 			return win(1)

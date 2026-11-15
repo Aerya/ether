@@ -151,9 +151,9 @@ func (s *Receipts) issueBatchAttempt(ctx context.Context, viewer *core.User, dev
  SELECT hash,expires,protocol,generation,
  ROW_NUMBER() OVER (PARTITION BY protocol,kind,subject,purpose,rank,generation ORDER BY expires DESC,hash DESC) AS recency
  FROM experience_receipts WHERE viewer_id=? AND device_id=? AND expires>?
- ) r WHERE r.recency>1 OR (? AND r.protocol=? AND r.generation<>?) OR NOT EXISTS (
+ ) r WHERE r.recency>1 OR (?=1 AND r.protocol=? AND r.generation<>?) OR NOT EXISTS (
  SELECT 1 FROM capability_claims c WHERE c.namespace=? AND c.digest=r.hash)
- ORDER BY r.expires,r.hash LIMIT ?)`, viewer.ID, device.ID, viewer.ID, device.ID, now, s.opts.Generation != nil, string(protocol), generation, ReceiptCapabilityNamespace, need)
+ ORDER BY r.expires,r.hash LIMIT ?)`, viewer.ID, device.ID, viewer.ID, device.ID, now, store.BoolInt(s.opts.Generation != nil), string(protocol), generation, ReceiptCapabilityNamespace, need)
 		if evictErr != nil {
 			return nil, evictErr
 		}

@@ -190,7 +190,7 @@ func (s *RowViewService) ListRowViews(ctx context.Context, req frontend.RowViewR
 			return nil, err
 		}
 		if found {
-			return views, nil
+			return views, err
 		}
 		// Listing starts a visit. A cached manifest can outlive its members
 		// or policy revision; replace it instead of rejecting a fresh visit.
@@ -359,7 +359,9 @@ func (s *RowViewService) ListRowViews(ctx context.Context, req frontend.RowViewR
 type manifestRow struct{ ID, Snapshot string }
 
 // loadManifest returns the shared ordered visit, revalidating every row and
-// entry. A revoked member invalidates the visit instead of shifting offsets.
+// entry. Once initial validation succeeds, found stays true on errors so a
+// concurrent refresh or policy change cannot trigger a silent rebuild.
+// A revoked member invalidates the visit instead of shifting offsets.
 func (s *RowViewService) loadManifest(ctx context.Context, req frontend.RowViewRequest, scope string) ([]frontend.RowView, bool, error) {
 	var generation, payload string
 	var expires int64
@@ -433,25 +435,25 @@ func (s *RowViewService) loadManifest(ctx context.Context, req frontend.RowViewR
 	var current string
 	var currentExpiry int64
 	if err = s.o.DB.QueryRowContext(ctx, `SELECT generation,expires FROM experience_row_view_manifests WHERE scope_hash=? AND viewer_id=? AND device_id=? AND protocol=?`, scope, req.Viewer.ID, req.Device.ID, string(req.Protocol)).Scan(&current, &currentExpiry); err != nil || current != generation || currentExpiry <= s.o.Now().UnixMilli() {
-		return nil, false, ErrRowViewStale
+		return nil, true, ErrRowViewStale
 	}
 	active, err := s.viewer(ctx, req.Viewer, req.Device, req.Protocol)
 	if err != nil {
-		return nil, false, ErrRowViewNotFound
+		return nil, true, ErrRowViewNotFound
 	}
 	for _, snap := range snapshots {
 		if !s.o.ValidRow(ctx, active, req.Device, req.Protocol, snap) {
-			return nil, false, ErrRowViewStale
+			return nil, true, ErrRowViewStale
 		}
 	}
 	if len(allRefs) > 0 {
 		if _, err := s.resolveAll(ctx, active, req.Device, req.Protocol, allRefs); err != nil {
-			return nil, false, ErrRowViewStale
+			return nil, true, ErrRowViewStale
 		}
 	}
 	// A refresh can commit while the final policy pass is running.
 	if err = s.o.DB.QueryRowContext(ctx, `SELECT generation,expires FROM experience_row_view_manifests WHERE scope_hash=? AND viewer_id=? AND device_id=? AND protocol=?`, scope, req.Viewer.ID, req.Device.ID, string(req.Protocol)).Scan(&current, &currentExpiry); err != nil || current != generation || currentExpiry <= s.o.Now().UnixMilli() {
-		return nil, false, ErrRowViewStale
+		return nil, true, ErrRowViewStale
 	}
 	return out, true, nil
 }

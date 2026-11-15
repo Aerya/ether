@@ -304,7 +304,10 @@ export default function LiveTV() {
     pageState.current = state;
     setRows(new Map());
     setPage(null);
-    tv.channelPage({ offset: 0, limit: CHANNELS_PER_PAGE, q: search, filter, group, sort: channelSort }, ctl.signal)
+    tv.channelPage(
+      { offset: 0, limit: CHANNELS_PER_PAGE, q: search, filter, group, sort: channelSort },
+      ctl.signal,
+    )
       .then((p) => {
         if (ctl.signal.aborted || pageState.current !== state) return;
         state.loaded.add(0);

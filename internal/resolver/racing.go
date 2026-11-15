@@ -13,6 +13,7 @@ import (
 )
 
 type candidate struct {
+	sourcePreferred  bool // source routing deliberately selected this candidate as the leader
 	identityWeak     bool // shared title without evidence identifying this show
 	belowScore       bool
 	counted          int

@@ -279,6 +279,7 @@ func (s *Service) routeSources(cands []candidate, t *core.Title, trace *Trace) [
 	}
 	out := make([]candidate, 0, len(cands))
 	out = append(out, cands[first])
+	out[0].sourcePreferred = true
 	// Hedge: the best of the other source second, so ranked validation
 	// checks both sources at once.
 	other := -1
