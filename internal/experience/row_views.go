@@ -577,8 +577,14 @@ func (s *RowViewService) ResolveRowView(ctx context.Context, req frontend.RowVie
 			if after != receiptEpoch {
 				return frontend.RowViewPage{}, ErrRowViewStale
 			}
-			tokens = cached.tokens
-			receiptExpiry = time.Unix(cached.expires, 0)
+			live, e := s.o.Receipts.receiptsLive(ctx, u.ID, req.Device.ID, req.Protocol, cached.tokens)
+			if e != nil {
+				return frontend.RowViewPage{}, e
+			}
+			if live {
+				tokens = cached.tokens
+				receiptExpiry = time.Unix(cached.expires, 0)
+			}
 		}
 	}
 	if tokens == nil {
@@ -604,7 +610,7 @@ func (s *RowViewService) ResolveRowView(ctx context.Context, req frontend.RowVie
 					delete(s.pageReceipts, key)
 				}
 			}
-			if len(s.pageReceipts) < 512 {
+			if _, exists := s.pageReceipts[receiptKey]; exists || len(s.pageReceipts) < 512 {
 				s.pageReceipts[receiptKey] = rowPageReceipts{tokens: tokens, expires: min(expires/1000, receiptExpiry.Unix()), epoch: receiptEpoch}
 			}
 			s.receiptMu.Unlock()
