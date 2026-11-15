@@ -903,7 +903,11 @@ func (s *Service) serveOwnedPlaylist(w http.ResponseWriter, r *http.Request, ss 
 		writeStreamError(w, core.ErrNotFound)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	// Include the source target for passthrough inputs with longer segments.
+	lease.tl.mu.Lock()
+	target := max(lease.tl.target, lease.tl.targetFloor, s.latencyPolicy().SegmentDuration())
+	lease.tl.mu.Unlock()
+	ctx, cancel := context.WithTimeout(r.Context(), target/2)
 	defer cancel()
 	err := lease.tl.waitStarted(ctx)
 	if errors.Is(err, errNeedsRelay) {

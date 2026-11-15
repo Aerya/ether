@@ -160,6 +160,7 @@ const IDENTITY_PRESETS: IdentityPreset[] = [
 
 function defaultConfig(): EtherConfig {
   return {
+    liveTV: { latencyProfile: "auto" },
     posters: {
       version: 1,
       assetFolder: "/media/posters",
@@ -5071,7 +5072,9 @@ export function createFakeServer(opts: FakeOptions = {}) {
           ? "openSubtitles"
           : seg[1] === "plexservers"
             ? "plexServers"
-            : seg[1];
+            : seg[1] === "livetv"
+              ? "liveTV"
+              : seg[1];
       return json({
         section: key,
         value: (state.config as unknown as Record<string, unknown>)[key],
@@ -5084,7 +5087,9 @@ export function createFakeServer(opts: FakeOptions = {}) {
           ? "openSubtitles"
           : seg[1] === "plexservers"
             ? "plexServers"
-            : seg[1];
+            : seg[1] === "livetv"
+              ? "liveTV"
+              : seg[1];
       // Like the server: the body is merged onto the stored section.
       const prev = (state.config as unknown as Record<string, unknown>)[key];
       let value =

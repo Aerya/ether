@@ -98,6 +98,8 @@ func (s *Service) acquirePassthrough(ss *session) *ownedLease {
 		ctx, cancel := context.WithCancel(s.serviceContext())
 		log := s.logger().With("channel", c.ID, "owned", "passthrough")
 		tl := newOwnedTimeline(c.ID, log, nil, reserve, slates)
+		policy := s.latencyPolicy()
+		tl.windowSpan, tl.startBehind = policy.PlaylistWindow(), policy.TargetLatency()
 		tl.setHint(slateProfileFromInfo(c.ID, ss.info.MediaInfo, "ts"))
 		p := &passthroughProducer{s: s, tl: tl, c: c, caps: ss.caps, log: log,
 			src: ss.inputSource, raw: ss.inputURL, headers: ss.inputHeaders.Clone(), suggest: make(chan sourceChoice, 1)}

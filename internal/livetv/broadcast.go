@@ -706,7 +706,7 @@ func (b *broadcast) run() {
 		// A live input's burst spends its provider backlog, the server
 		// reserve: it stops at its target lead, not at a published edge
 		// that trails the encoder.
-		headroom := b.startupTarget + 4*time.Second
+		headroom := b.startupTarget + 2*b.segment
 		if b.burstNoWait {
 			headroom = b.startupTarget
 		}

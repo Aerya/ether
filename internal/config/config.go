@@ -620,6 +620,9 @@ type LiveTVScreens struct {
 }
 
 type LiveTV struct {
+	// LatencyProfile is the owner preference for every Live TV client.
+	LatencyProfile string `json:"latencyProfile,omitempty"`
+
 	// Extra act-break scan bandwidth. Zero selects defaults (1 GiB/day,
 	// 256 MiB/release including conservative read overhead, 1 GiB large-file
 	// threshold). Negative daily/release limits disable pre-air full scans.

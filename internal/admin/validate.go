@@ -111,6 +111,9 @@ func ValidateConfig(cfg config.Config) []FieldError {
 		v.add("liveTV.healthSweepMinutes", "must be between -1 and 1440")
 	}
 	v.httpURL("liveTV.logoIndexUrl", cfg.LiveTV.LogoIndexURL, false)
+	if !config.ValidLiveLatencyProfile(cfg.LiveTV.LatencyProfile) {
+		v.add("liveTV.latencyProfile", "must be auto, low or stable")
+	}
 	if !config.ValidLiveTVStability(cfg.LiveTV.Stability) {
 		v.add("liveTV.stability", "must be fastest, balanced or rocksolid")
 	}

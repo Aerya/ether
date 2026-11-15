@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/braedonsaunders/ether/internal/config"
 	"github.com/braedonsaunders/ether/internal/frontend"
 	"github.com/braedonsaunders/ether/internal/frontend/kit/caps"
 	"github.com/braedonsaunders/ether/internal/frontend/kit/ids"
@@ -441,6 +442,13 @@ func (i *instance) playbackStart(w http.ResponseWriter, r *http.Request) {
 	output := map[string]any{"protocol_version": 3, "plan_id": plan.ID, "session_id": session.ID, "delivery": delivery, "plan_attempt_key": plan.ID, "stream": stream, "timeline": timeline, "selected_tracks": selected, "effective_recipe": recipe, "claims": map[string]any{"video": map[string]any{"hdr10": hdr10, "hdr10_plus": hdr10Plus, "hlg": hlg, "dolby_vision": dv}, "audio": audioClaim, "subtitles": map[string]any{"ass_styling_preserved": assStylingPreserved, "bitmap_overlay": false, "bitmap_sidecar": false}}, "subtitle": subtitle, "transformations": siloTransformations(plan), "applied_quirks": []any{}, "runtime_corrections": []any{}, "degradation_warnings": []any{}, "decision_reason": plan.Decision.Reason, "requested_media_file_id": b.FileID, "effective_media_file_id": b.FileID, "source": source, "subtitle_fidelity_policy": fidelityPolicy, "available_qualities": qualities}
 	if active := siloActiveQuality(b.Quality, qualities, plan.Decision.VideoCopy, encodeHeight); active != "" {
 		output["active_quality"] = active
+	}
+	if liveFile {
+		live := config.LiveTV{}
+		if i.host.HostConfig != nil {
+			live = i.host.HostConfig().LiveTV
+		}
+		output["livePolicy"] = live.LatencyPolicy()
 	}
 	document := map[string]any{"outcome": "playable", "protocol_version": 3, "server_features": []string{"playback_plan_v3", "neutral_playback_v3_contract_v1", "header_authenticated_media_v1", "sequenced_progress_v1", "plan_source_duration_v1"}, "session_id": session.ID, "playback_plan": output}
 	i.rememberPlan(session.ID, playbackPlan{format: format, live: liveFile, baseID: plan.ID, delivery: delivery, requireAuthored: requireAuthoredFidelity, body: document})

@@ -1009,3 +1009,25 @@ export function searchIdentityOptions(includeCustom: boolean, includeEther = tru
     (o) => o.value !== "sabnzbd" && o.value !== "nzbget",
   );
 }
+
+export const LIVE_LATENCY: FieldGroup[] = localized(() => [
+  {
+    id: "live-latency",
+    title: t("Live TV"),
+    fields: [
+      {
+        key: "latencyProfile",
+        label: t("Live TV delay"),
+        kind: "select",
+        options: [
+          { value: "auto", label: t("Automatic") },
+          { value: "low", label: t("Prefer low delay") },
+          { value: "stable", label: t("Prefer stability") },
+        ],
+        help: t(
+          "Choose how close to live everyone watches. Less delay can mean more interruptions.",
+        ),
+      },
+    ],
+  },
+]);
