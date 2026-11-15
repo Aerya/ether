@@ -111,6 +111,13 @@ func (s *Server) rememberStreamRequest(r *http.Request, user *frontend.Viewer, k
 			}
 			track = &binding.Info
 		}
+		// Timeline telemetry repeats the server-selected stream. Persisting
+		// that echo turns a rule choice into a permanent manual veto. The
+		// part-selection endpoint is an explicit command, even for the same
+		// track, and Off (track == nil) must always be remembered.
+		if kind == "subtitle" && r.URL.Path == "/:/timeline" && s.subtitleSelectionEcho(FromContext(r.Context()), key, track) {
+			continue
+		}
 		if err = s.svc().trackPrefs.Remember(r.Context(), user.ID, key, kind, track); err != nil {
 			s.log.Warn("save stream preference", "error", err)
 		}
