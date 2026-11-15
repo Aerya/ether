@@ -579,7 +579,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 			problem(w, 400, "request", "invalid_request")
 			return
 		}
-		url, err := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: frontend.StreamHLS, Position: s.position, LazyStart: true, Continuous: true, AudioStream: audio, SubtitleStream: sub})
+		url, err := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: frontend.StreamHLS, Position: s.position, LazyStart: true, Continuous: true, AudioStream: audio, SubtitleStream: sub, BurnImageSubtitles: true})
 		if err != nil {
 			fail(w, err)
 			return

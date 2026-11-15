@@ -206,6 +206,13 @@ func (b *Broker) StartStream(ctx context.Context, a frontend.SessionAccess, id s
 				return "", core.ErrNotAvailable
 			}
 			options.SubtitleStream = *req.SubtitleStream
+			if req.BurnImageSubtitles {
+				for _, st := range ps.Info.Streams {
+					if st.Type == "subtitle" && st.Index == *req.SubtitleStream && transcode.IsImageSubtitle(st.Codec) {
+						options.BurnSubtitles = true
+					}
+				}
+			}
 		}
 		// Track restarts must package the selected source tracks, never silently
 		// return the original file's default audio selection.

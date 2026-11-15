@@ -730,6 +730,10 @@ type StreamRequest struct {
 
 	// Track changes are source stream indices, validated before output restart.
 	AudioStream, SubtitleStream *int
+	// BurnImageSubtitles burns a selected image subtitle (PGS, VobSub, DVB)
+	// into segmented output even when the client could draw it from the
+	// original file: HLS cannot carry image subtitles.
+	BurnImageSubtitles bool
 	// LazyStart leaves the encoder idle until a rendition is requested.
 	LazyStart bool
 	// Continuous uses one uniform segment clock, without adaptive discontinuities.
