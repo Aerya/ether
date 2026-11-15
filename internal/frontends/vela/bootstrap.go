@@ -12,6 +12,13 @@ import (
 
 // Keep wire grants comfortably inside the row cursor (10m), row visit (15m)
 // and receipt (30m) lifetimes. Lazy eviction needs no idle worker.
+const bootstrapAttempts = 3
+
+// bootstrapChangedError is private: clients only see the bounded retry contract.
+type bootstrapChangedError struct{}
+
+func (*bootstrapChangedError) Error() string { return "bootstrap changed during assembly" }
+
 const bootstrapTTL = 2 * time.Minute
 const bootstrapBytes = 8 << 20
 
@@ -51,7 +58,7 @@ func (i *instance) bootstrap(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(local.NoProviderWait(r.Context()))
 	}
 	source, hasRevision := i.host.Experience.(homeRevisionSource)
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < bootstrapAttempts; attempt++ {
 		freshness := i.bootstrapFreshness()
 		var before frontend.HomeRevision
 		cacheable := false
@@ -73,7 +80,7 @@ func (i *instance) bootstrap(w http.ResponseWriter, r *http.Request) {
 				case <-r.Context().Done():
 					return
 				}
-				attempt-- // A waiter must re-read the revision after the builder commits.
+				// Re-read the revision after the builder commits, within the same bounded budget.
 				continue
 			}
 			if entry != nil && time.Now().Before(entry.expires) && entry.revision == before && entry.freshness == freshness {
@@ -137,12 +144,10 @@ func (i *instance) bootstrap(w http.ResponseWriter, r *http.Request) {
 		}
 		if buildErr != nil {
 			if errors.Is(buildErr, frontend.ErrRowViewStale) || errors.Is(buildErr, frontend.ErrLiveGuideStale) {
-				if attempt == 0 {
+				if attempt+1 < bootstrapAttempts {
 					continue
 				}
-				// Bootstrap has no client cursor to expire. Continuous policy
-				// changes are a transient assembly failure, never a 409.
-				buildErr = errors.New("vela: bootstrap changed during assembly")
+				buildErr = &bootstrapChangedError{}
 			}
 			fail(w, buildErr, r)
 			return
@@ -150,6 +155,7 @@ func (i *instance) bootstrap(w http.ResponseWriter, r *http.Request) {
 		cache(w, r, payload)
 		return
 	}
+	fail(w, &bootstrapChangedError{}, r)
 }
 
 // Catalogue enrichment is a soft refresh (bounded by TTL). Policy revocations

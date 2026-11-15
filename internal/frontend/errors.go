@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/braedonsaunders/ether/internal/core"
@@ -45,3 +46,24 @@ type IdentityRateLimitError struct{ RetryAfter time.Duration }
 
 func (*IdentityRateLimitError) Error() string { return ErrRateLimited.Error() }
 func (*IdentityRateLimitError) Unwrap() error { return ErrRateLimited }
+
+// RejectedPlaybackPath records why a delivery candidate could not be used.
+type RejectedPlaybackPath struct {
+	Path    string   `json:"path"`
+	Reasons []string `json:"reasons"`
+}
+
+// NoCompatiblePathError is a terminal capability/policy decision, rather than
+// a temporary source failure. It preserves the candidates evaluated by planning.
+type NoCompatiblePathError struct {
+	RejectedPaths []RejectedPlaybackPath `json:"rejectedPaths"`
+}
+
+func (e *NoCompatiblePathError) Error() string {
+	var reasons []string
+	for _, path := range e.RejectedPaths {
+		reasons = append(reasons, path.Path+": "+strings.Join(path.Reasons, ", "))
+	}
+	return "no compatible playback path: " + strings.Join(reasons, "; ")
+}
+func (*NoCompatiblePathError) Unwrap() error { return ErrNotAvailable }

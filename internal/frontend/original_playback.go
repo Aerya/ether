@@ -61,6 +61,22 @@ func (c *OriginalPlaybackCapabilities) supports(info MediaInfo, audioIndex int, 
 	if !c.Valid() || info.Estimated || !originalHas(c.DemuxContainers, info.Container) {
 		return false
 	}
+	// Match the planner's default/first audio selection. Other language or
+	// commentary tracks do not need installed decoders when they are not played.
+	if audioIndex < 0 {
+		for _, stream := range info.Streams {
+			if stream.Type != "audio" {
+				continue
+			}
+			if audioIndex < 0 {
+				audioIndex = stream.Index
+			}
+			if stream.Default {
+				audioIndex = stream.Index
+				break
+			}
+		}
+	}
 	video, audio, selected := false, false, false
 	for _, s := range info.Streams {
 		switch s.Type {
@@ -71,7 +87,7 @@ func (c *OriginalPlaybackCapabilities) supports(info MediaInfo, audioIndex int, 
 			video = true
 		case "audio":
 			audio = true
-			if s.Index == audioIndex || audioIndex < 0 {
+			if s.Index == audioIndex {
 				if !audioFallback && (s.Codec == "" || !originalHas(c.AudioDecoders, s.Codec)) {
 					return false
 				}

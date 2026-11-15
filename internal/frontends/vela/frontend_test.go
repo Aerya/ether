@@ -63,6 +63,7 @@ func TestVelaProtocolInvariants(t *testing.T) {
 			{&frontend.IdentityRateLimitError{RetryAfter: 125*time.Second + time.Millisecond}, 503, "126", "capacity", "rate_limited", 2},
 			{&frontend.ReceiptCapacityError{RetryAfter: time.Minute}, 429, "60", "capacity", "receipt_capacity", 3},
 			{frontend.ErrTrackSourceUnavailable, 502, "2", "source", "track_source_unavailable", 3},
+			{&bootstrapChangedError{}, 409, "1", "conflict", "bootstrap_changed", 3},
 		} {
 			w := httptest.NewRecorder()
 			fail(w, tc.err)
@@ -81,6 +82,39 @@ func TestVelaProtocolInvariants(t *testing.T) {
 			delay, _ := strconv.Atoi(tc.delay)
 			if w.Code != tc.status || w.Header().Get("Retry-After") != tc.delay || response.Error.Class != tc.class || response.Error.Code != tc.code || !response.Error.Retry.Allowed || response.Error.Retry.AfterSeconds != delay || response.Error.Retry.MaxAttempts != tc.attempts {
 				t.Fatal("identity retry policy lost", w.Code, response)
+			}
+		}
+	})
+	t.Run("typed playback failures", func(t *testing.T) {
+		for _, tc := range []struct {
+			err         error
+			status      int
+			class, code string
+		}{
+			{&frontend.NoCompatiblePathError{RejectedPaths: []frontend.RejectedPlaybackPath{{Path: "hls", Reasons: []string{"transcode not allowed"}}}}, 422, "playback", "no_compatible_path"},
+			{frontend.ErrNotAvailable, 409, "source", "not_available"},
+			{frontend.ErrNotFound, 404, "not-found", "not_found"},
+			{frontend.ErrPolicyUnconfirmed, 403, "policy", "policy_unconfirmed"},
+			{frontend.ErrSourceChanged, 409, "conflict", "source_changed"},
+			{frontend.ErrSourceUnavailable, 502, "source", "source_unavailable"},
+		} {
+			w := httptest.NewRecorder()
+			fail(w, tc.err)
+			var wire struct {
+				Error struct {
+					Class, Code   string
+					RejectedPaths []frontend.RejectedPlaybackPath
+					Retry         struct{ Allowed bool }
+				}
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &wire); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != tc.status || wire.Error.Class != tc.class || wire.Error.Code != tc.code || wire.Error.Retry.Allowed {
+				t.Fatalf("typed failure: %d %s", w.Code, w.Body)
+			}
+			if tc.code == "no_compatible_path" && (len(wire.Error.RejectedPaths) != 1 || wire.Error.RejectedPaths[0].Reasons[0] != "transcode not allowed") {
+				t.Fatal("rejected paths lost", w.Body)
 			}
 		}
 	})
