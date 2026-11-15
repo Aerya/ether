@@ -480,7 +480,10 @@ func (s *Server) parsePlayRequest(r *http.Request) (playRequest, error) {
 			}
 		}
 	}
-	p.manualSubtitle = p.subSet
+	// A client commonly echoes the track Ether marked selected. That is
+	// not a manual veto of the viewer's automatic-download rule. Off is
+	// always explicit; PUT choices also carry a durable manual intent.
+	p.manualSubtitle = p.subSet && !s.subtitleSelectionEcho(pr, key, p.subStream)
 	p.sessionID = cmp.Or(q.Get("session"), q.Get("transcodeSessionId"), pr.SessionID)
 	if p.sessionID == "" {
 		p.sessionID = sanitizeSessionID(pr.ClientID + "-" + key.String())
