@@ -122,7 +122,7 @@ func (s *Service) ownerHandler(logos channelLogoFetcher) http.Handler {
 		offset, _ := strconv.Atoi(q.Get("offset"))
 		v, e := s.ChannelPage(r.Context(), ChannelPageQuery{
 			Limit: limit, Offset: offset, Q: q.Get("q"), Filter: q.Get("filter"), Source: q.Get("source"),
-			Group: q.Get("group"),
+			Group: q.Get("group"), Sort: q.Get("sort"),
 		})
 		if e == nil {
 			s.redactAddonChannels(r.Context(), v.Channels)
