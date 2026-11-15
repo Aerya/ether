@@ -60,4 +60,21 @@ func TestBedtimeWindows(t *testing.T) {
 			}
 		})
 	}
+	t.Run("legacy hours share admission evaluator", func(t *testing.T) {
+		p := Policy{AllowedHours: []int{9, 10, 15}, Timezone: "America/Toronto"}
+		at := time.Date(2026, 11, 14, 17, 30, 0, 0, time.UTC)
+		state := PlaybackTimeState(viewer, p, at)
+		want := time.Date(2026, 11, 14, 20, 0, 0, 0, time.UTC)
+		if !state.Active || state.NextAllowedAt == nil || !state.NextAllowedAt.Equal(want) {
+			t.Fatalf("legacy state: %+v", state)
+		}
+		if !CanPlayWithPolicy(viewer, p, false, at) {
+			t.Fatal("continuing item interrupted")
+		}
+		p.Bedtime = &core.Bedtime{Time: "20:30", WakeTime: "06:00", Timezone: "UTC"}
+		if err := CheckBedtime(viewer, p, at); err != nil {
+			t.Fatal("legacy hours override replacement bedtime", err)
+		}
+	})
+
 }

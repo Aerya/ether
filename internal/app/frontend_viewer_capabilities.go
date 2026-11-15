@@ -42,7 +42,7 @@ func (a *App) viewerCapabilities(local *identity.Local, experience frontend.Expe
 				return out, err
 			}
 			out.Bedtime = p.Bedtime
-			state := safety.BedtimeStatus(v, p.Bedtime, time.Now())
+			state := safety.PlaybackTimeState(v, p, time.Now())
 			out.BedtimeState = &state
 			revision, err := viewerpolicy.Read(ctx, a.db)
 			if err != nil {

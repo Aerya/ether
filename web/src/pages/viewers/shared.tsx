@@ -417,7 +417,7 @@ function emptyPolicy(): SafetyPolicy {
     remoteDisabled: false,
     maxBitrateKbps: 0,
     allowedHours: [],
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timezone: "",
   };
 }
 
@@ -429,7 +429,8 @@ export function normalizePolicy(p: Partial<SafetyPolicy> | null | undefined): Sa
     blockedGenres: p?.blockedGenres ?? [],
     blockedKeywords: p?.blockedKeywords ?? [],
     allowedHours: [...(p?.allowedHours ?? [])].sort((a, b) => a - b),
-    timezone: p?.timezone ?? base.timezone,
+    timezone:
+      p?.bedtime?.timezone || p?.timezone || (p?.allowedHours?.length ? "UTC" : base.timezone),
   };
 }
 
