@@ -42,6 +42,11 @@ sort validation, viewer visibility, and pagination keep their existing handling.
 No catalogue-wide browse, refresh, background work, or client-version branch is
 introduced. Section query-editor validation is unchanged.
 
+At the coordinator's direction, unknown children options are also ignored after
+identifying the known browse fields. Known field values/operators, sort, limit,
+and query structure still go through existing validation. This prevents another
+inherited or newly introduced app option from producing the same failure.
+
 ## PMS comparison and limits
 
 Reviewed `internal/conform/plex/plex.go` and decoded the six recorded JSON
@@ -52,12 +57,21 @@ return HTTP 200, `viewGroup=episode`, and ten episodes (`size=10`). This agrees
 with Ether's existing successful children renderer; the failure occurs before
 rendering.
 
-The recorded requests have no `libraryHubsOnly` option. They cannot prove PMS's
-response to that exact option, and no live PMS or production system was queried.
-The coordinator must compare the same children requests with and without
-`libraryHubsOnly=0` / `1` on a safe reference PMS before claiming exact live PMS
-parity. `docs/design.md`, requested by CLAUDE.md, is absent from this checkout
-and the canonical checkout's docs directory.
+The recorded requests have no `libraryHubsOnly` option. The coordinator supplied
+additional read-only evidence from the owner's real PMS; this worker did not
+access it. For show 9-1-1, ratingKey 5484:
+
+- `/library/metadata/5484/children`: HTTP 200, size 11; All episodes first with
+  `leafCount=147`, then seasons.
+- The same call with `libraryHubsOnly=1`: HTTP 200, identical response.
+- The same call with `includeUserState=1&libraryHubsOnly=1&excludeAllLeaves=1`:
+  HTTP 200, size 10, no All episodes directory; seasons start at index 1.
+
+This confirms that PMS ignores the reported option and honours
+`excludeAllLeaves`. Ether already honours the latter in `handleChildren`; the
+shared option classifier already keeps it out of browse predicates.
+`docs/design.md`, requested by CLAUDE.md, is absent from this checkout and the
+canonical checkout's docs directory.
 
 ## Coordinator device verification
 
@@ -75,11 +89,14 @@ Passed with `CGO_ENABLED=0`, `GOMAXPROCS=4`, one command at a time:
 
 - `timeout 180 go test -p 2 ./internal/frontends/plex -run '^TestChildWatchQueryBeforePageAndFlagValidation$' -count=1 -timeout 120s`
 - `timeout 180 go vet -p 2 ./internal/frontends/plex`
+- `timeout 240 go build -p 2 ./...` (final change)
 - `git diff --check`
 
 The existing focused test checks subtree filtering, pagination, and flag/sort
-validation; it does not replay the missing Fire TV request. No per-bug test was
-added, per the release brief. The coordinator owns the full build/test gate.
+validation; it does not replay the missing Fire TV request. It and vet passed
+before the additional unknown-option handling requested by the coordinator;
+the final change is also compiled with a pure-Go full build. No per-bug test
+was added, per the release brief. The coordinator owns the full test gate.
 
 ## Issue-reply draft (do not post until verified)
 
@@ -87,11 +104,14 @@ Thanks for the new logs. They identify the option that the first fix missed:
 `libraryHubsOnly`. Ether 0.3.10 rejected it twice while loading a show's seasons,
 at 10:02:39 and 10:03:52, and returned an error instead of the season list. That
 explains why the problem continued after the earlier async-option fix. The same
-missing option is still present in 0.3.11.
+rejection also remains in 0.3.11.
 
 The follow-up change makes Ether accept this option on season and episode
 lists. It is in the shared Plex request handling, so it applies to every Plex
 app, including the older Fire TV app. It does not require a library rescan.
+We also compared the request on Plex Media Server: it returns the same seasons
+with or without `libraryHubsOnly=1`. Ether now ignores unknown children options
+so that another app option cannot cause this same rejection.
 
 The code change is ready for release verification. We still need to confirm
 the full search → show → season → episode flow on Fire TV 10.30.1.3505 before
