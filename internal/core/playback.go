@@ -25,6 +25,10 @@ type HLSRamp struct {
 }
 
 type HLSRequest struct {
+	// MediaGeneration is a trusted presentation namespace retained across encoder
+	// recovery. A new playback start must use a fresh value; empty mints one.
+	MediaGeneration string `json:",omitempty"`
+
 	// QualityRungs explicitly requests the lazy, policy-filtered file-session ladder.
 	QualityRungs    bool
 	QualityRungIDs  []string

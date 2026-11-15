@@ -997,8 +997,15 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		index := *req.SoftSubtitleStream
 		softSubtitleStream = &index
 	}
+	mediaGeneration := req.MediaGeneration
+	if mediaGeneration == "" {
+		mediaGeneration = randomHex(16)
+	}
+	if _, _, ok := splitMediaGeneration("g-" + mediaGeneration + "-segment"); !ok {
+		return nil, errors.New("transcode: invalid media generation")
+	}
 	s := &Session{
-		mediaGeneration:         randomHex(16),
+		mediaGeneration:         mediaGeneration,
 		serialRungs:             req.QualityRungs,
 		copyOrigin:              copyOrigin,
 		androidMatroskaHLS:      d.AndroidMatroskaHLS,

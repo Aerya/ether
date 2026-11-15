@@ -852,3 +852,8 @@ func (f Sessions) ReportSample(ctx context.Context, a frontend.SessionAccess, id
 	}
 	return frontend.ReportApplied, err
 }
+
+// CachedPaths models a host with already resolved, authorized paths.
+func (f VirtualPaths) CachedPaths(ctx context.Context, v *core.Viewer, d core.Device, keys []core.RatingKey) (map[core.RatingKey]string, error) {
+	return f.Paths(ctx, v, d, keys)
+}

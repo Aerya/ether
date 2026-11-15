@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/braedonsaunders/ether/internal/config"
 	"github.com/braedonsaunders/ether/internal/frontend"
 	"github.com/braedonsaunders/ether/internal/frontend/kit/caps"
 	"github.com/braedonsaunders/ether/internal/frontend/kit/ids"
@@ -444,7 +443,7 @@ func (i *instance) playbackStart(w http.ResponseWriter, r *http.Request) {
 		output["active_quality"] = active
 	}
 	if liveFile {
-		live := config.LiveTV{}
+		live := (frontend.HostConfig{}).LiveTV
 		if i.host.HostConfig != nil {
 			live = i.host.HostConfig().LiveTV
 		}

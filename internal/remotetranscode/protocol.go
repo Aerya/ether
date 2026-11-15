@@ -56,6 +56,7 @@ type Identity struct {
 	Generation uint64
 }
 type Start struct {
+	MediaGeneration    string               `json:",omitempty"`
 	Ramp               core.HLSRamp         `json:",omitzero"`
 	Resume             *core.HLSResume      `json:",omitempty"`
 	RecoveryStart      *core.RecoveryStart  `json:",omitempty"`
@@ -233,7 +234,7 @@ func SupportsRequest(r core.HLSRequest, c Capabilities) bool {
 			return false
 		}
 	}
-	b, err := json.Marshal(Start{Ramp: r.Ramp, Resume: cloneResume(r.Resume), RecoveryStart: core.CloneRecoveryStart(r.RecoveryStart), Keyframes: r.Info.Keyframes, ReleaseID: r.ReleaseID, Info: r.Info, Decision: r.Decision, Offset: r.StartOffset, SegmentDuration: r.SegmentDuration, IndependentProof: r.RequireIndependentProof})
+	b, err := json.Marshal(Start{MediaGeneration: r.MediaGeneration, Ramp: r.Ramp, Resume: cloneResume(r.Resume), RecoveryStart: core.CloneRecoveryStart(r.RecoveryStart), Keyframes: r.Info.Keyframes, ReleaseID: r.ReleaseID, Info: r.Info, Decision: r.Decision, Offset: r.StartOffset, SegmentDuration: r.SegmentDuration, IndependentProof: r.RequireIndependentProof})
 	if err != nil || len(b) > MaxMessage-8192 {
 		return false
 	}
