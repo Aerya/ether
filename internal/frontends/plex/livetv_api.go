@@ -181,6 +181,7 @@ func (s *Server) registerLiveTVRoutes(r chi.Router) {
 	get(liveProviderPath+"/watchnow", s.handleLiveWatchNow)
 	get(liveProviderPath+"/watchnow/all", s.handleLiveGuide)
 	get(liveProviderPath+"/watchnow/categories/{category}", s.handleLiveGuide)
+	get(liveProviderPath+"/watchnow/groups/{sourceID}/{group}", s.handleLiveGuide)
 	get(liveProviderPath+"/sections/{section}/all", s.handleLiveGuide)
 	get("/livetv/guide.xml", func(w http.ResponseWriter, r *http.Request) {
 		s.svc().liveTV.ServeXMLTV(w, r, FromContext(r.Context()).User)
@@ -393,6 +394,23 @@ func (s *Server) handleLiveChannels(w http.ResponseWriter, r *http.Request) {
 			s.writeErr(w, r, err)
 			return
 		}
+	}
+	if rawGroup := chi.URLParam(r, "group"); rawGroup != "" {
+		groupName, err := url.PathUnescape(rawGroup)
+		if err != nil {
+			groupName = rawGroup
+		}
+		sourceID, err := url.PathUnescape(chi.URLParam(r, "sourceID"))
+		if err != nil {
+			sourceID = chi.URLParam(r, "sourceID")
+		}
+		filtered := make([]frontend.LiveTVChannel, 0, len(cs))
+		for _, c := range cs {
+			if (sourceID == "" || c.SourceID == sourceID) && strings.EqualFold(strings.TrimSpace(c.Group), strings.TrimSpace(groupName)) {
+				filtered = append(filtered, c)
+			}
+		}
+		cs = filtered
 	}
 	category := chi.URLParam(r, "category")
 	if category == "" {
@@ -1067,7 +1085,8 @@ func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 				if slug == "" {
 					slug = strconv.Itoa(i + 1)
 				}
-				if h, ok := makeHub(liveProviderPath+"/watchnow/all", g.Group, "livetv.group."+slug, items); ok {
+				groupKeyURL := liveProviderPath + "/watchnow/groups/" + url.PathEscape(g.SourceID) + "/" + url.PathEscape(g.Group)
+				if h, ok := makeHub(groupKeyURL, g.Group, "livetv.group."+slug, items); ok {
 					out = append(out, h)
 				}
 			}
