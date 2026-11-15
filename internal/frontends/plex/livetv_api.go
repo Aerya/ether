@@ -894,8 +894,16 @@ func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 		byID[c.ID] = c
 	}
 	sort.SliceStable(ps, func(i, j int) bool {
+		iLive := !ps[i].Start.After(now)
+		jLive := !ps[j].Start.After(now)
+		if iLive != jLive {
+			return iLive
+		}
 		ci, oki := byID[ps[i].ChannelID]
 		cj, okj := byID[ps[j].ChannelID]
+		if !iLive && !ps[i].Start.Equal(ps[j].Start) {
+			return ps[i].Start.Before(ps[j].Start)
+		}
 		if oki != okj {
 			return oki
 		}
@@ -920,9 +928,9 @@ func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 	}
 
 	const maxItems = 24
-	var sportsLive, sportsUpcoming, movies, news, crime, reality, comedy, explore, tonight, kids []model.Metadata
+	var sports, movies, news, crime, reality, comedy, explore, tonight, kids []model.Metadata
 	seen := map[string]map[string]bool{
-		"sportsLive": {}, "sportsUp": {}, "movies": {}, "news": {},
+		"sports": {}, "movies": {}, "news": {},
 		"crime": {}, "reality": {}, "comedy": {}, "explore": {}, "tonight": {}, "kids": {},
 	}
 	appendUnique := func(bucket string, dst *[]model.Metadata, p frontend.LiveTVProgramme, dedupKey string) {
@@ -941,10 +949,7 @@ func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 		}
 		dedupKey := p.ChannelID + "|" + p.Item.Title
 		if frontend.LiveCategory(p.Item.Genres, "sports", p.Item.MediaType) {
-			appendUnique("sportsLive", &sportsLive, p, dedupKey)
-			if p.Start.After(now) {
-				appendUnique("sportsUp", &sportsUpcoming, p, dedupKey)
-			}
+			appendUnique("sports", &sports, p, dedupKey)
 		}
 		if frontend.LiveCategory(p.Item.Genres, "movie", p.Item.MediaType) {
 			appendUnique("movies", &movies, p, dedupKey)
@@ -994,16 +999,15 @@ func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 		key, title, id string
 		items          []model.Metadata
 	}{
-		{liveProviderPath + "/watchnow/categories/sports", "Live & Upcoming Sports", "livetv.sports.live", sportsLive},
-		{liveProviderPath + "/watchnow/categories/sports", "Upcoming Sports", "livetv.sports.upcoming", sportsUpcoming},
-		{liveProviderPath + "/watchnow/categories/movie", "Movies on TV", "livetv.movies", movies},
+		{liveProviderPath + "/watchnow/categories/movie", "Movies", "livetv.movies", movies},
+		{liveProviderPath + "/watchnow/categories/sports", "Sports", "livetv.sports", sports},
 		{liveProviderPath + "/watchnow/categories/news", "News", "livetv.news", news},
 		{liveProviderPath + "/watchnow/categories/crime", "True Crime", "livetv.crime", crime},
 		{liveProviderPath + "/watchnow/categories/reality", "Reality", "livetv.reality", reality},
 		{liveProviderPath + "/watchnow/categories/comedy", "Comedy", "livetv.comedy", comedy},
-		{liveProviderPath + "/watchnow/categories/explore", "Explore", "livetv.explore", explore},
-		{liveProviderPath + "/watchnow/all", "New & Live Tonight", "livetv.tonight", tonight},
 		{liveProviderPath + "/watchnow/categories/kids", "Kids & Family", "livetv.kids", kids},
+		{liveProviderPath + "/watchnow/categories/explore", "Explore", "livetv.explore", explore},
+		{liveProviderPath + "/watchnow/all", "On Tonight", "livetv.tonight", tonight},
 	}
 	out := make([]model.Hub, 0, len(specs))
 	for _, sp := range specs {
