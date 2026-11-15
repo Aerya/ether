@@ -25,44 +25,17 @@ type RowInteractionPolicy struct {
 
 func (p RowInteractionPolicy) Allowed(ctx context.Context, u *core.User, subject ReceiptSubject) bool {
 	if imp := subject.Impression; imp != nil {
-		if len(imp.Entries) == 0 || imp.Kind == "" {
-			return false
-		}
-		if imp.Collection != 0 && !p.AllowEntry(ctx, u, string(frontend.RowEntryCollection), imp.Collection.String()) {
-			return false
-		}
-		if imp.Collection != 0 && !p.CollectionMembers(ctx, u, imp.Collection, imp.Entries) {
-			return false
-		}
-		switch frontend.Placement(imp.Placement) {
-		case frontend.PlacementHome:
-		case frontend.PlacementLibrary:
-			id, err := strconv.Atoi(imp.ViewID)
-			valid := false
-			for _, lib := range p.Libraries {
-				if lib.ID == id {
-					valid = true
-					break
-				}
+		if cache, ok := ctx.Value(rowInteractionBatchKey{}).(map[*core.NeutralImpression]bool); ok {
+			allowed, checked := cache[imp]
+			if !checked {
+				allowed = p.allowedImpression(ctx, u, imp)
+				cache[imp] = allowed
 			}
-			if err != nil || !valid || !SectionAllowed(u, id) {
+			if !allowed {
 				return false
 			}
-		case frontend.PlacementDetail:
-			if imp.Item == 0 {
-				return false
-			}
-			t, err := p.Get(ctx, imp.Item)
-			if err != nil || !p.Visibility.Visible(ctx, u, t) {
-				return false
-			}
-		default:
+		} else if !p.allowedImpression(ctx, u, imp) {
 			return false
-		}
-		for _, entry := range imp.Entries {
-			if !p.AllowEntry(ctx, u, entry.Kind, entry.ID) {
-				return false
-			}
 		}
 		if subject.Kind == "row" {
 			return true
@@ -80,6 +53,54 @@ func (p RowInteractionPolicy) Allowed(ctx context.Context, u *core.User, subject
 		return false
 	}
 	return false
+}
+
+// This memo exists only during one issuance policy pass, fenced by the
+// shared epoch. Every subject in a page references the same trusted impression;
+// checking its full membership for each card otherwise costs N squared reads.
+type rowInteractionBatchKey struct{}
+
+func (p RowInteractionPolicy) allowedImpression(ctx context.Context, u *core.User, imp *core.NeutralImpression) bool {
+	if len(imp.Entries) == 0 || imp.Kind == "" {
+		return false
+	}
+	if imp.Collection != 0 && !p.AllowEntry(ctx, u, string(frontend.RowEntryCollection), imp.Collection.String()) {
+		return false
+	}
+	if imp.Collection != 0 && !p.CollectionMembers(ctx, u, imp.Collection, imp.Entries) {
+		return false
+	}
+	switch frontend.Placement(imp.Placement) {
+	case frontend.PlacementHome:
+	case frontend.PlacementLibrary:
+		id, err := strconv.Atoi(imp.ViewID)
+		valid := false
+		for _, lib := range p.Libraries {
+			if lib.ID == id {
+				valid = true
+				break
+			}
+		}
+		if err != nil || !valid || !SectionAllowed(u, id) {
+			return false
+		}
+	case frontend.PlacementDetail:
+		if imp.Item == 0 {
+			return false
+		}
+		t, err := p.Get(ctx, imp.Item)
+		if err != nil || !p.Visibility.Visible(ctx, u, t) {
+			return false
+		}
+	default:
+		return false
+	}
+	for _, entry := range imp.Entries {
+		if !p.AllowEntry(ctx, u, entry.Kind, entry.ID) {
+			return false
+		}
+	}
+	return true
 }
 
 // AllowedAction distinguishes a row exposure from one actually visible entry.

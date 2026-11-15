@@ -101,6 +101,7 @@ func (s *Receipts) issueBatchAttempt(ctx context.Context, viewer *core.User, dev
 			s.opts.Prefetch(ctx, keys)
 		}
 	}
+	ctx = context.WithValue(ctx, rowInteractionBatchKey{}, make(map[*core.NeutralImpression]bool))
 	for _, subject := range subjects {
 		if !s.opts.Allowed(ctx, active, device, protocol, subject) {
 			return nil, ErrReceipt

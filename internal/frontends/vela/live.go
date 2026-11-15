@@ -10,7 +10,7 @@ import (
 func (i *instance) channels(w http.ResponseWriter, r *http.Request) {
 	v, token, e := i.viewer(r)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	if i.host.LiveTV == nil {
@@ -19,17 +19,17 @@ func (i *instance) channels(w http.ResponseWriter, r *http.Request) {
 	}
 	scope, e := i.livePageScope(r, v, token)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	cursor, e := i.readLiveCursor(r, scope, hashJSON([]any{"channels", limit(r)}))
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	channels, e := i.host.LiveTV.Channels(r.Context(), v)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	out := []object{}
@@ -43,7 +43,7 @@ func (i *instance) channels(w http.ResponseWriter, r *http.Request) {
 	for _, c := range channels[start:end] {
 		art, err := i.liveArtwork(r, token, 0, c.ID, c.Images)
 		if err != nil {
-			fail(w, err)
+			fail(w, err, r)
 			return
 		}
 		channel := object{"id": c.ID, "number": c.Number, "name": c.Name, "kind": c.Kind, "artwork": art, "favorite": c.Favorite, "rating": c.Rating}
@@ -63,7 +63,7 @@ func (i *instance) channels(w http.ResponseWriter, r *http.Request) {
 	if end < len(channels) {
 		next, err := i.nextLiveCursor(cursor, end, snapshot)
 		if err != nil {
-			fail(w, err)
+			fail(w, err, r)
 			return
 		}
 		page["continuation"], page["nextCursor"] = "more", next
@@ -73,7 +73,7 @@ func (i *instance) channels(w http.ResponseWriter, r *http.Request) {
 func (i *instance) guide(w http.ResponseWriter, r *http.Request) {
 	v, token, e := i.viewer(r)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	if i.host.LiveTV == nil {
@@ -97,12 +97,12 @@ func (i *instance) guide(w http.ResponseWriter, r *http.Request) {
 	}
 	scope, e := i.livePageScope(r, v, token)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	cursor, e := i.readLiveCursor(r, scope, hashJSON([]any{"guide", from.UTC(), until.UTC(), channels, limit(r)}))
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	pager, ok := i.host.LiveTV.(frontend.LiveGuidePager)
@@ -112,7 +112,7 @@ func (i *instance) guide(w http.ResponseWriter, r *http.Request) {
 	}
 	programmes, e := pager.GuidePage(i.host.Experience.NoProviderWait(r.Context()), v, frontend.LiveGuidePageQuery{LiveGuideQuery: frontend.LiveGuideQuery{Channels: channels, From: from, Until: until, Limit: limit(r), Device: requestDevice(r)}, Offset: cursor.Offset, Snapshot: cursor.Snapshot})
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	out := []object{}
@@ -125,7 +125,7 @@ func (i *instance) guide(w http.ResponseWriter, r *http.Request) {
 			}
 			images, err := i.liveArtwork(r, token, item, channel, []frontend.Image{img})
 			if err != nil {
-				fail(w, err)
+				fail(w, err, r)
 				return
 			}
 			art = append(art, images...)
@@ -144,7 +144,7 @@ func (i *instance) guide(w http.ResponseWriter, r *http.Request) {
 		}
 		next, err := i.nextLiveCursor(cursor, cursor.Offset+len(out), programmes.Snapshot)
 		if err != nil {
-			fail(w, err)
+			fail(w, err, r)
 			return
 		}
 		page["continuation"], page["nextCursor"] = "more", next

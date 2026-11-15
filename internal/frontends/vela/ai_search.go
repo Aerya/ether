@@ -40,7 +40,7 @@ func (i *instance) aiSearchScope(r *http.Request, v *frontend.Viewer, token stri
 func (i *instance) startAISearch(w http.ResponseWriter, r *http.Request) {
 	v, token, err := i.viewer(r)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	if !i.aiSearchAvailable() {
@@ -57,12 +57,12 @@ func (i *instance) startAISearch(w http.ResponseWriter, r *http.Request) {
 	}
 	scope, err := i.aiSearchScope(r, v, token)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	var nonce [24]byte
 	if _, err = rand.Read(nonce[:]); err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	now := time.Now()
@@ -183,7 +183,7 @@ func (i *instance) cancelAISearch(w http.ResponseWriter, r *http.Request) { i.re
 func (i *instance) readAISearch(w http.ResponseWriter, r *http.Request, cancel bool) {
 	v, token, err := i.viewer(r)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	if !i.aiSearchAvailable() {
@@ -192,7 +192,7 @@ func (i *instance) readAISearch(w http.ResponseWriter, r *http.Request, cancel b
 	}
 	scope, err := i.aiSearchScope(r, v, token)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	var b struct{ Generation int }
@@ -233,7 +233,7 @@ func (i *instance) readAISearch(w http.ResponseWriter, r *http.Request, cancel b
 		}
 		visible, e := i.host.Experience.(frontend.AISearcher).AISearchVisible(r.Context(), v, keys)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		allowed := make(map[frontend.RatingKey]bool, len(visible))

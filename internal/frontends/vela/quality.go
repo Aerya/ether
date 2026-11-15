@@ -56,7 +56,7 @@ func (i *instance) prepareFallback(w http.ResponseWriter, r *http.Request, v *fr
 	}
 	rungs, err := q.QualityRungs(r.Context(), i.access(r, v), id)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return false
 	}
 	var chosen frontend.HLSRung
@@ -78,7 +78,7 @@ func (i *instance) prepareFallback(w http.ResponseWriter, r *http.Request, v *fr
 	if err != nil {
 		s.plan["fallback"] = object{"state": "unavailable", "pathId": pathID}
 		s.publish("plan")
-		fail(w, err)
+		fail(w, err, r)
 		return false
 	}
 	for _, p := range s.plan["paths"].([]object) {

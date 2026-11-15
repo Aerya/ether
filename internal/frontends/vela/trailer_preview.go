@@ -59,7 +59,7 @@ func (i *instance) allowPreview(viewer int64) bool {
 func (i *instance) trailerPreview(w http.ResponseWriter, r *http.Request) {
 	v, token, err := i.viewer(r)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	var b struct {
@@ -87,12 +87,12 @@ func (i *instance) trailerPreview(w http.ResponseWriter, r *http.Request) {
 	profile := caps.DeviceProfile{MaxStreamingBitrate: b.Client.MaxBitrate, DirectPlayProfiles: []caps.DirectPlayProfile{{Type: "Video", Container: strings.Join(b.Client.Containers, ","), VideoCodec: strings.Join(b.Client.VideoCodecs, ","), AudioCodec: strings.Join(b.Client.AudioCodecs, ",")}}}
 	declared, err := i.host.Capabilities.Build(i.identityContext(r), frontend.CapabilityRequest{Viewer: v, Device: caps.DeviceInfo{Protocol: "vela", Product: "Vela", Platform: b.Client.Device.Platform, Version: b.Client.Device.AppVersion, ClientID: requestDevice(r).ID, DeviceName: b.Client.Device.Name, VideoCodecs: b.Client.VideoCodecs, AudioCodecs: b.Client.AudioCodecs, Containers: b.Client.Containers, MaxHeight: b.Client.MaxHeight, MaxBitrateKbps: b.Client.MaxBitrate / 1000}, Profile: profile, UserAgent: r.UserAgent()})
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	scope, err := i.grantScope(r.Context(), token, requestDevice(r))
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	language := ""
@@ -101,7 +101,7 @@ func (i *instance) trailerPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := i.host.Sessions.(frontend.TrailerPreviews).TrailerPreview(r.Context(), frontend.TrailerPreviewRequest{Viewer: v, Device: requestDevice(r), Protocol: "vela", Item: item, IdempotencyKey: b.IdempotencyKey, Language: language, Caps: declared.Client})
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	if result.State == "ready" && result.Grant == nil {

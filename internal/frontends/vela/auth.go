@@ -46,7 +46,7 @@ func (i *instance) auth(w http.ResponseWriter, r *http.Request) {
 	case "web-code":
 		_, access, err := i.viewer(r)
 		if err != nil {
-			fail(w, err)
+			fail(w, err, r)
 			return
 		}
 		if d.ID != requestDevice(r).ID || !i.trustedSecureOrigin(r, b.TargetOrigin) {
@@ -62,7 +62,7 @@ func (i *instance) auth(w http.ResponseWriter, r *http.Request) {
 		}
 		code, err := issuer.IssueOriginWebCode(ctx, access, d, b.TargetOrigin)
 		if err != nil {
-			fail(w, err)
+			fail(w, err, r)
 			return
 		}
 		send(w, 200, object{"code": code, "targetOrigin": b.TargetOrigin, "expiresAt": time.Now().Add(time.Minute).UTC().Format(time.RFC3339)})
@@ -70,25 +70,25 @@ func (i *instance) auth(w http.ResponseWriter, r *http.Request) {
 	case "sign-in":
 		a, e := i.host.Identity.SignIn(ctx, b.Username, b.Password, d)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		i.tokens(w, r, a, "", d)
 	case "refresh":
 		a, f, e := i.host.Identity.Refresh(ctx, b.RefreshToken, d)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		i.tokens(w, r, a, f, d)
 	case "revoke":
 		_, token, e := i.viewer(r)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		if e = i.host.Identity.Revoke(ctx, token); e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		send(w, 200, object{"accepted": true})
@@ -110,7 +110,7 @@ func (i *instance) auth(w http.ResponseWriter, r *http.Request) {
 			a, e = service.RedeemDeviceWebCode(ctx, b.Code, d)
 		}
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		i.tokens(w, r, a, "", d)
@@ -121,12 +121,12 @@ func (i *instance) auth(w http.ResponseWriter, r *http.Request) {
 		}
 		code, secret, e := i.host.Identity.QuickConnectInitiate(ctx, d)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		details, e := i.host.Identity.QuickConnectDetails(ctx, secret)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		if path == "quick-connect" {
@@ -139,7 +139,7 @@ func (i *instance) auth(w http.ResponseWriter, r *http.Request) {
 		}
 		url, e := i.host.ViewerPortalURL(ctx, r)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		send(w, 200, object{"deviceCode": secret, "userCode": code, "verificationUrl": url, "expiresAt": details.ExpiresAt.UTC().Format(time.RFC3339), "pollIntervalSeconds": 5})
@@ -161,7 +161,7 @@ func (i *instance) auth(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		// Use a recorder so the token response keeps the same authoritative expiry.
@@ -177,7 +177,7 @@ func (i *instance) auth(w http.ResponseWriter, r *http.Request) {
 	case "device/approve", "quick-connect/approve":
 		v, _, e := i.viewer(r)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		code := b.Code
@@ -185,7 +185,7 @@ func (i *instance) auth(w http.ResponseWriter, r *http.Request) {
 			code = b.UserCode
 		}
 		if e = i.host.Identity.QuickConnectApprove(ctx, v, code); e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		send(w, 200, object{"accepted": true})
