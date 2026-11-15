@@ -22,6 +22,25 @@ const describeCacheMax = 256
 // detached search request cannot inherit the caller's short response budget.
 const describeJobTimeout = 2 * time.Minute
 
+// CollectionDraftAgent is the console Describe it tool loop, run headlessly.
+// Kept as a dependency to avoid coupling collection evaluation to the agent.
+type CollectionDraftAgent interface {
+	DescribeCollectionAvailable() bool
+	DescribeCollection(context.Context, string) (*core.CollectionSpec, error)
+}
+
+func (s *Service) SetDescribeAgent(agent CollectionDraftAgent) {
+	s.depsMu.Lock()
+	s.describeAgent = agent
+	s.depsMu.Unlock()
+}
+
+func (s *Service) collectionDraftAgent() CollectionDraftAgent {
+	s.depsMu.RLock()
+	defer s.depsMu.RUnlock()
+	return s.describeAgent
+}
+
 type describeDraft struct {
 	done chan struct{}
 	spec *core.CollectionSpec
@@ -36,9 +55,8 @@ type describeJob struct {
 }
 
 func (s *Service) DescriptiveSearchAvailable() bool {
-	chat := s.chatDep()
-	_, ok := s.cat.(core.DescriptiveCatalog)
-	return ok && chat != nil && chat.Enabled()
+	agent := s.collectionDraftAgent()
+	return agent != nil && agent.DescribeCollectionAvailable()
 }
 
 // DescribeSearch schedules at most two jobs. Cache hits never call the model.
@@ -175,9 +193,17 @@ func (s *Service) describeSpec(ctx context.Context, key, query string) (*core.Co
 	draft = &describeDraft{done: make(chan struct{}), at: s.now()}
 	s.describeDrafts[key] = draft
 	s.describeMu.Unlock()
-	// Same generator, SpecGuide and parseDraft used by Describe a collection.
-	// Only local sources are useful in a search; no external discovery work.
-	spec, _, err := s.generate(ctx, query, "", true)
+	// Run exactly the console's Describe it agent, not the one-shot generator.
+	var spec *core.CollectionSpec
+	var err error
+	if agent := s.collectionDraftAgent(); agent != nil {
+		spec, err = agent.DescribeCollection(core.WithoutCatalogViewer(ctx), query)
+	} else {
+		err = ErrLLMDisabled
+	}
+	if err == nil && spec == nil {
+		err = fmt.Errorf("collection agent returned no draft")
+	}
 	if err == nil {
 		// Rules only: never log the request, model explanation or credentials.
 		log := s.log
@@ -205,7 +231,13 @@ func (s *Service) runDescribe(parent context.Context, user *core.User, key, quer
 	if err == nil {
 		stage = "candidates"
 		candidatesStarted := time.Now()
-		result.Items, err = s.cat.(core.DescriptiveCatalog).DescribeCandidates(core.WithCatalogViewer(core.WithExplicitSearch(ctx), user), *spec, 200)
+		// The console's collection_draft uses Preview too: preserve its source
+		// handling, rule evaluation, exclusions, ordering and spec limit.
+		var preview *core.CollectionPreview
+		preview, err = s.Preview(core.WithoutCatalogViewer(ctx), *spec, 200)
+		if err == nil {
+			result.Items = preview.Items
+		}
 		candidateDuration = time.Since(candidatesStarted)
 		if err == nil {
 			result.State, result.Title = "ready", spec.Name
@@ -213,7 +245,7 @@ func (s *Service) runDescribe(parent context.Context, user *core.User, key, quer
 			// Taste only orders rule-matching candidates; it cannot add titles.
 			stage = "scoring"
 			scoringStarted := time.Now()
-			if sc := s.personalScorer(); sc != nil && user != nil && len(result.Items) > 1 {
+			if sc := s.personalScorer(); spec.Sort == "personal" && sc != nil && user != nil && len(result.Items) > 1 {
 				if scores, e := sc.ScoreTitles(ctx, user, result.Items); e == nil {
 					slices.SortStableFunc(result.Items, func(a, b core.Title) int {
 						x, y := scores[a.Key], scores[b.Key]

@@ -74,6 +74,7 @@ type Service struct {
 	describeJobs   map[string]*describeJob
 	describeDrafts map[string]*describeDraft
 	describeActive int
+	describeAgent  CollectionDraftAgent
 	vibe           *vibeRegistry
 	vibeTTL        time.Duration
 	vibeMax        int

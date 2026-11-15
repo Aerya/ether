@@ -3,6 +3,7 @@ package collections_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/braedonsaunders/ether/internal/agent"
+	"github.com/braedonsaunders/ether/internal/agent/builtin"
+	"github.com/braedonsaunders/ether/internal/agent/tools"
 	"github.com/braedonsaunders/ether/internal/catalog"
 	"github.com/braedonsaunders/ether/internal/collections"
 	"github.com/braedonsaunders/ether/internal/config"
@@ -52,14 +56,50 @@ func (c *describeChat) Chat(ctx context.Context, _ []llm.Message, _ bool) (strin
 	return string(b), nil
 }
 
-type describeCatalog struct {
-	core.Catalog
-	calls atomic.Int32
-}
+// Turn a scripted model reply into a real tool call; every draft is executed
+// by the same built-in collection_draft tool used by the console.
+type draftReplyModel struct{ chat collections.Chatter }
 
-func (c *describeCatalog) DescribeCandidates(ctx context.Context, sp core.CollectionSpec, n int) ([]core.Title, error) {
-	c.calls.Add(1)
-	return c.Catalog.(core.DescriptiveCatalog).DescribeCandidates(ctx, sp, n)
+func (m draftReplyModel) Enabled() bool                { return m.chat.Enabled() }
+func (draftReplyModel) ProviderID() string             { return "fake" }
+func (draftReplyModel) ModelName() string              { return "fake-describe" }
+func (draftReplyModel) ToolsSupported() (bool, string) { return true, "" }
+func (m draftReplyModel) StreamTools(ctx context.Context, req llm.ToolRequest) (<-chan llm.Event, error) {
+	out := make(chan llm.Event, 2)
+	if req.Messages[len(req.Messages)-1].Role == "tool" {
+		out <- llm.Event{Kind: llm.EventTextDelta, Text: "Here are the picks."}
+	} else {
+		msgs := []llm.Message{{Role: "system", Content: req.System}}
+		for _, msg := range req.Messages {
+			msgs = append(msgs, llm.Message{Role: msg.Role, Content: msg.Content})
+		}
+		raw, err := m.chat.Chat(ctx, msgs, true)
+		if err != nil {
+			return nil, err
+		}
+		raw = strings.TrimSuffix(strings.TrimPrefix(raw, "```json\n"), "\n```")
+		out <- llm.Event{Kind: llm.EventToolCall, ToolCallID: "draft", ToolName: "collection_draft", Input: json.RawMessage(raw)}
+	}
+	out <- llm.Event{Kind: llm.EventDone}
+	close(out)
+	return out, nil
+}
+func setDescribeModel(t *testing.T, db *sql.DB, cat *catalog.Catalog, svc *collections.Service, chat collections.Chatter) {
+	t.Helper()
+	catalogue := tools.NewCatalogue()
+	if err := catalogue.Register(builtin.All(builtin.Deps{
+		Catalog: cat, Collections: svc,
+		Status: &struct{ builtin.StatusService }{}, Playback: &struct{ builtin.PlaybackService }{},
+		Resolver: &struct{ builtin.ResolverService }{}, Logs: &struct{ builtin.LogService }{},
+		LiveTV: &struct{ builtin.LiveTVService }{}, Sources: &struct{ builtin.SourceService }{},
+		Profiles: &struct{ builtin.ProfileService }{}, Frontends: &struct{ builtin.FrontendService }{},
+		Server:    &struct{ builtin.ServerService }{},
+		OwnerUser: func(context.Context) (*core.User, error) { return &core.User{ID: 1, IsOwner: true}, nil },
+		Routes:    func() []builtin.RouteInfo { return nil },
+	})...); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetDescribeAgent(agent.New(agent.Options{Model: draftReplyModel{chat}, Catalogue: catalogue, Store: agent.NewStore(db)}))
 }
 
 func TestDescriptiveSearch(t *testing.T) {
@@ -80,9 +120,8 @@ func TestDescriptiveSearch(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	counted := &describeCatalog{Catalog: cat}
 	var warnings bytes.Buffer
-	svc, err := collections.New(db, counted, slog.New(slog.NewJSONHandler(&warnings, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	svc, err := collections.New(db, cat, slog.New(slog.NewJSONHandler(&warnings, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,15 +129,14 @@ func TestDescriptiveSearch(t *testing.T) {
 		t.Fatal("advertised without AI")
 	}
 	disabled, err := svc.DescribeSearch(ctx, nil, "cozy cute girls night in", true)
-	if err != nil || disabled.State != "unavailable" || counted.calls.Load() != 0 {
+	if err != nil || disabled.State != "unavailable" {
 		t.Fatalf("disabled: %+v %v", disabled, err)
 	}
 	cases := []struct{ q, g string }{{"cozy cute girls night in", "Romance"}, {"scary creepy night", "Horror"}, {"rainy night", "Mystery"}, {"epic adventure", "Adventure"}, {"mind bending", "Science Fiction"}, {"date night", "Romance"}, {"family movie night", "Family"}, {"background easy watching", "Comedy"}, {"tearjerker", "Drama"}, {"adrenaline", "Action"}, {"80s sci-fi under 2 hours", "Science Fiction"}}
 	for _, tc := range cases {
 		t.Run(tc.q, func(t *testing.T) {
 			chat := &describeChat{genre: tc.g, block: make(chan struct{})}
-			svc.SetLLM(chat)
-			before := counted.calls.Load()
+			setDescribeModel(t, db, cat, svc, chat)
 			pending, e := svc.DescribeSearch(ctx, &core.User{ID: 7}, tc.q, false)
 			if e != nil || pending.State != "pending" {
 				t.Fatalf("pending: %+v %v", pending, e)
@@ -112,8 +150,8 @@ func TestDescriptiveSearch(t *testing.T) {
 				t.Fatalf("wrong genre: %+v", ready.Items)
 			}
 			_, e = svc.DescribeSearch(ctx, &core.User{ID: 7}, "  "+strings.ToUpper(tc.q)+"  ", true)
-			if e != nil || chat.calls.Load() != 1 || counted.calls.Load() != before+1 {
-				t.Fatalf("cache/model/query bound: model %d queries %d err %v", chat.calls.Load(), counted.calls.Load()-before, e)
+			if e != nil || chat.calls.Load() != 1 {
+				t.Fatalf("cache/model bound: model %d err %v", chat.calls.Load(), e)
 			}
 			c, items, ok, e := svc.VibeCollection(ctx, &core.User{ID: 7}, tc.q)
 			if e != nil || !ok || !c.Key.IsEphemeral() || len(items) == 0 {
@@ -128,7 +166,7 @@ func TestDescriptiveSearch(t *testing.T) {
 	// Admission and request cancellation must not shorten the shared job's
 	// model deadline or create a queue of blocked goroutines.
 	blocked := &describeChat{genre: "Comedy", block: make(chan struct{}), deadline: make(chan time.Duration, 2)}
-	svc.SetLLM(blocked)
+	setDescribeModel(t, db, cat, svc, blocked)
 	for _, query := range []string{"bounded job one", "bounded job two"} {
 		request, cancelRequest := context.WithCancel(ctx)
 		pending, e := svc.DescribeSearch(request, nil, query, false)
@@ -159,7 +197,7 @@ func TestDescriptiveSearch(t *testing.T) {
 
 	failed := &describeChat{genre: "Comedy"}
 	failed.fail.Store(true)
-	svc.SetLLM(failed)
+	setDescribeModel(t, db, cat, svc, failed)
 	for i := 0; i < 2; i++ {
 		result, e := svc.DescribeSearch(ctx, nil, "unavailable model query", true)
 		if e == nil || result.State != "failed" || result.RetryAfterSeconds < 1 || result.RetryAfterSeconds > 60 {
@@ -176,8 +214,8 @@ func TestDescriptiveSearch(t *testing.T) {
 
 }
 
-// Fake model fixture, not a live or recorded model response. Exercise the real Generate /
-// parseDraft / SQL candidate / taste path with conjunctive semantic constraints.
+// Fake agent-model fixture, not a live or recorded response. Exercises the
+// console tool loop, collection_draft, Preview and explicit personal sorting.
 type relevanceReply struct {
 	calls int
 	msgs  []llm.Message
@@ -187,7 +225,7 @@ func (*relevanceReply) Enabled() bool { return true }
 func (r *relevanceReply) Chat(_ context.Context, msgs []llm.Message, _ bool) (string, error) {
 	r.calls++
 	r.msgs = msgs
-	return "```json\n" + `{"spec":{"name":"A cozy night in","mediaType":"mixed","sources":[{"kind":"catalog"}],"match":"all","rules":[{"field":"genre","op":"in","value":["Comedy","Romance","Family"]},{"field":"keyword","op":"in","value":["friendship","romantic comedy"]}],"exclude":[{"field":"genre","op":"in","value":["Horror","Thriller","Crime","War"]}],"sort":"popularity","sortDesc":true,"limit":200}}` + "\n```", nil
+	return "```json\n" + `{"spec":{"name":"A cozy night in","mediaType":"mixed","sources":[{"kind":"catalog"}],"match":"all","rules":[{"field":"genre","op":"in","value":["Comedy","Romance","Family"]},{"field":"keyword","op":"in","value":["friendship","romantic comedy"]}],"exclude":[{"field":"genre","op":"in","value":["Horror","Thriller","Crime","War"]}],"sort":"personal","sortDesc":true,"limit":200}}` + "\n```", nil
 }
 
 type relevanceScorer struct {
@@ -235,7 +273,7 @@ func TestDescriptiveRelevance(t *testing.T) {
 		t.Fatal(err)
 	}
 	chat, scorer := &relevanceReply{}, &relevanceScorer{}
-	svc.SetLLM(chat)
+	setDescribeModel(t, db, cat, svc, chat)
 	svc.SetScorer(scorer)
 	viewer := &core.User{ID: 7}
 	started := time.Now()
@@ -250,8 +288,8 @@ func TestDescriptiveRelevance(t *testing.T) {
 	if len(scorer.seen) != 2 {
 		t.Fatalf("taste saw nonmatches: %+v", scorer.seen)
 	}
-	if !strings.Contains(chat.msgs[0].Content, collections.SpecGuide) || !strings.Contains(chat.msgs[0].Content, "mood") || !strings.Contains(chat.msgs[1].Content, "cozy cute girls night in") {
-		t.Fatal("temporary prompt must use the common guide and semantic instructions")
+	if !strings.Contains(chat.msgs[0].Content, "Describe a collection") || !strings.Contains(chat.msgs[1].Content, "cozy cute girls night in") {
+		t.Fatal("headless turn must use the console route guidance and tools")
 	}
 	started = time.Now()
 	cached, err := svc.DescribeSearch(ctx, viewer, "  COZY cute girls night IN  ", true)
