@@ -336,7 +336,7 @@ func (e *Engine) Open(ctx context.Context, releaseID string, payload []byte) (co
 		return nil, err
 	}
 	s := &httpSource{f: f, last: -2, priority: func() bool { return callerUrgent(ctx) }}
-	s.raCtx, s.raCancel = context.WithCancel(f.ctx)
+	s.raCtx, s.raCancel = newSeekEpoch(f.ctx)
 	return s, nil
 }
 
@@ -1209,6 +1209,13 @@ func (f *remoteFile) startRun(ctx context.Context, idx, n int64, mode fetchMode,
 		f.bmu.Unlock()
 		return fl, false
 	}
+	runs, _ := ctx.Value(seekRunsKey{}).(*seekRuns)
+	if !runs.register() {
+		f.bmu.Unlock()
+		fl := &blockFlight{done: make(chan struct{}), err: errRunCancelled}
+		close(fl.done)
+		return fl, false
+	}
 	var fls []*blockFlight
 	demand := new(atomic.Bool)
 	for i := idx; i < idx+max(n, 1) && i < f.nblocks; i++ {
@@ -1222,6 +1229,7 @@ func (f *remoteFile) startRun(ctx context.Context, idx, n int64, mode fetchMode,
 	f.runCount++
 	f.bmu.Unlock()
 	go func() {
+		defer runs.finish()
 		defer func() {
 			f.bmu.Lock()
 			f.runCount--
@@ -2376,7 +2384,6 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 		s.beginConsumption(f.e.now())
 		defer func() { s.recordConsumption(n, off, meterEpoch) }()
 	}
-	readComplete := false
 	if live {
 		s.mu.Lock()
 		if s.closed {
@@ -2402,18 +2409,20 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 		// fills of the start of the file and take a connection now.
 		far := first > 2
 		seek := !sequential && (s.last >= 0 || far)
+		var oldRuns *seekRuns
+		seekEnded := false
 		if seek {
-			s.sustain.resetRate(f.e.now())
+			// Keep the last consumption estimate while restarting its sample
+			// interval: the new position has no useful measurement yet.
+			s.sustain.rateAt, s.sustain.rateBytes = f.e.now(), 0
+			oldRuns, _ = s.raCtx.Value(seekRunsKey{}).(*seekRuns)
 			s.sustain.playhead = off
 			s.raCancel()
-			s.raCtx, s.raCancel = context.WithCancel(f.ctx)
+			s.raCtx, s.raCancel = newSeekEpoch(f.ctx)
 			f.beginUrgentSeek()
 			defer func() {
-				f.endUrgentSeek()
-				// New-position runs must not subscribe to the seek that
-				// just yielded the old ones.
-				if readComplete {
-					s.readAhead(lastBlock)
+				if !seekEnded {
+					f.endUrgentSeek()
 				}
 			}()
 		}
@@ -2432,11 +2441,28 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 			liveRun = ctx
 		}
 		s.mu.Unlock()
-		// Start read-ahead past this read before blocking, so the burst
-		// runs in parallel with the request for the bytes asked for.
-		if !seek {
-			s.readAhead(lastBlock)
+		if seek {
+			// Cancellation may drain a nearly complete response within the
+			// existing bounds. Await its body close and slot release here,
+			// before the new foreground GET enters host admission.
+			oldRuns.wait()
+			f.endUrgentSeek()
+			seekEnded = true
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
+			// Register the playhead first so read-ahead neither claims its
+			// blocks nor counts an obsolete run toward target parallelism.
+			f.bmu.Lock()
+			present := f.presentLocked(first)
+			f.bmu.Unlock()
+			if !present {
+				f.startRun(inheritReadPriority(liveRun, ctx), first,
+					min(maxRun, max(runLen, lastBlock-first+1)), mode, false)
+			}
 		}
+		// Start the entire bounded burst before waiting for the playhead.
+		s.readAhead(lastBlock)
 	}
 	for idx := first; idx <= lastBlock; idx++ {
 		data, err := f.block(ctx, idx, mode, min(maxRun, max(runLen, lastBlock-idx+1)), liveRun)
@@ -2449,7 +2475,6 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 		}
 		n += copy(p[n:], data[from:])
 	}
-	readComplete = true
 	// Cached deliveries must keep a degraded route exploring too: a fully
 	// buffered reader may otherwise never complete another network fetch.
 	if n > 0 && live && !core.IsSpeculative(ctx) && !isAnalysisRead(ctx) {
