@@ -174,13 +174,22 @@ func (s *Service) broadcastWindow(ctx context.Context, ss *session, r *http.Requ
 	return index, segments, nil
 }
 func (s *Service) serveBroadcastPlaylist(w http.ResponseWriter, r *http.Request, ss *session) {
-	_, segments, err := s.broadcastWindow(r.Context(), ss, r)
+	index, segments, err := s.broadcastWindow(r.Context(), ss, r)
 	if err != nil {
 		if errors.Is(err, core.ErrNotAvailable) {
 			w.Header().Set("Retry-After", "1")
 		}
 		writeStreamError(w, err)
 		return
+	}
+	ss.mu.Lock()
+	lease, vela := ss.broadcast, ss.caps.Protocol == "vela"
+	ss.mu.Unlock()
+	if vela {
+		window, err := broadcastLiveWindow(r.Context(), lease, index, segments)
+		if err == nil {
+			writeLiveAnchor(w, window)
+		}
 	}
 	// TARGETDURATION is a property of the rendition, including its short
 	// startup segments, and must not change as the window advances.
@@ -199,7 +208,11 @@ func (s *Service) serveBroadcastPlaylist(w http.ResponseWriter, r *http.Request,
 			uri = fmt.Sprintf("/livetv/sessions/%s/0/relay/%d.ts", ss.info.ID, seg.Seq)
 		}
 		uri = withAuth(uri, ss.streamGrant)
-		fmt.Fprintf(&b, "#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.6f,\n%s\n", seg.Start.UTC().Format(time.RFC3339Nano), seg.Duration.Seconds(), uri)
+		precision := 6
+		if vela {
+			precision = 9
+		}
+		fmt.Fprintf(&b, "#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.*f,\n%s\n", seg.Start.UTC().Format(time.RFC3339Nano), precision, seg.Duration.Seconds(), uri)
 	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-store")

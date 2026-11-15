@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/braedonsaunders/ether/internal/core"
+	"github.com/braedonsaunders/ether/internal/frontend"
 )
 
 // ownedTimeline is the live playlist a client actually reads on the Direct
@@ -61,6 +62,7 @@ type ownedTimeline struct {
 	discSeq    int64
 	lastAt     time.Time     // scheduled publication time of the newest segment
 	lastDur    time.Duration // its duration
+	elapsed    time.Duration // end of the newest published segment
 	lastPDT    time.Time
 	format     mediaFormat // newest published media format
 	mapRes     string      // newest published media init section
@@ -83,6 +85,7 @@ type ownedTimeline struct {
 
 type ownedSegment struct {
 	seq    int64
+	start  time.Duration // exact cumulative session time, independent of PDT
 	dur    time.Duration
 	disc   bool
 	pdt    time.Time
@@ -426,6 +429,8 @@ func (t *ownedTimeline) publishLocked(seg *ownedSegment, at time.Time) {
 }
 
 func (t *ownedTimeline) appendLocked(seg *ownedSegment, at time.Time) {
+	seg.start = t.elapsed
+	t.elapsed += seg.dur
 	seg.seq = t.nextSeq
 	t.nextSeq++
 	pdt := t.lastPDT
@@ -619,8 +624,15 @@ func (t *ownedTimeline) resource(name string) (ownedResource, bool) {
 
 // render writes the media playlist. seg and res build session-scoped URIs.
 func (t *ownedTimeline) render(seg func(seq int64, ext string) string, res func(name string) string) []byte {
+	body, _ := t.renderSnapshot(seg, res, false)
+	return body
+}
+
+// renderSnapshot binds the anchor and body under the same publication lock.
+func (t *ownedTimeline) renderSnapshot(seg func(int64, string) string, res func(string) string, exact bool) ([]byte, frontend.LiveWindow) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	window, _ := t.liveWindowLocked()
 	var b bytes.Buffer
 	version := 3
 	for _, s := range t.window {
@@ -672,9 +684,13 @@ func (t *ownedTimeline) render(seg func(seq int64, ext string) string, res func(
 		}
 		mapRes = s.mapRes
 		fmt.Fprintf(&b, "#EXT-X-PROGRAM-DATE-TIME:%s\n", s.pdt.UTC().Format("2006-01-02T15:04:05.000Z"))
-		fmt.Fprintf(&b, "#EXTINF:%.3f,\n%s\n", s.dur.Seconds(), seg(s.seq, s.ext))
+		precision := 3
+		if exact {
+			precision = 9
+		}
+		fmt.Fprintf(&b, "#EXTINF:%.*f,\n%s\n", precision, s.dur.Seconds(), seg(s.seq, s.ext))
 	}
-	return b.Bytes()
+	return b.Bytes(), window
 }
 
 func (t *ownedTimeline) playlistWindow() time.Duration {

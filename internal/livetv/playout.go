@@ -926,11 +926,14 @@ func (s *Service) serveOwnedPlaylist(w http.ResponseWriter, r *http.Request, ss 
 		return
 	}
 	prefix := "/livetv/sessions/" + ss.info.ID + "/0/"
-	body := lease.tl.render(func(seq int64, ext string) string {
+	body, window := lease.tl.renderSnapshot(func(seq int64, ext string) string {
 		return withAuth(prefix+"relay/"+strconv.FormatInt(seq, 10)+"."+ext, ss.streamGrant)
 	}, func(name string) string {
 		return withAuth(prefix+"resource/"+name, ss.streamGrant)
-	})
+	}, ss.caps.Protocol == "vela")
+	if ss.caps.Protocol == "vela" {
+		writeLiveAnchor(w, window)
+	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodHead {
