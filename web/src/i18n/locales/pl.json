@@ -468,6 +468,7 @@
   "m_01a9f3f1e1f405": "Wtyczka obsługuje bibliotekę sama zamiast przez aplikacje powyżej.",
   "m_01aac44b990a0a": "Sprawdź sugestie AI. Pewność jest szacunkowa.",
   "m_01adfbaf6437be": "Od godziny",
+  "m_01aec828db9a82": "Jellyfin w przeglądarce",
   "m_01af9435193543": {
     "few": "Raz na {count} godziny dla każdego widza",
     "many": "Raz na {count} godzin dla każdego widza",
@@ -1968,6 +1969,7 @@
   "m_06945a6347e207": "Statystyki",
   "m_06955ccd41c7fa": "Spokojny dzień",
   "m_0695ec21e87e93": "Premiera ostatnio wyemitowanego zwykłego sezonu; nieznane daty na końcu",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "Żądania",
   "m_06971389277796": "Przeczytaj przewodnik po klastrze",
   "m_069833363c2729": "Język widza",
@@ -9299,6 +9301,7 @@
   "m_1f042646ff05b1": "Brak na tym serwerze",
   "m_1f047dc5ead0d8": "Zawsze debrid z pamięci podręcznej",
   "m_1f04bba1d18793": "Oglądaj Ether w przeglądarce.",
+  "m_1f04c9cc3e7caf": "Wybierz odtwarzacz internetowy",
   "m_1f052ad34a44c4": "Najczęściej oglądane seriale",
   "m_1f0537ed22aaca": "{rate} MB/s",
   "m_1f058562a0ddb3": "Wznów dopasowywanie",

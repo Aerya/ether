@@ -452,6 +452,7 @@
   "m_01a9f3f1e1f405": "Pluginet serverar biblioteket självt i stället för via apparna ovan.",
   "m_01aac44b990a0a": "Granska AI-förslagen. Säkerheten är en uppskattning.",
   "m_01adfbaf6437be": "Från timme",
+  "m_01aec828db9a82": "Jellyfin webb",
   "m_01af9435193543": {
     "one": "En gång i timmen per tittare",
     "other": "En gång per {count} timmar och tittare"
@@ -1880,6 +1881,7 @@
   "m_06945a6347e207": "Statistik",
   "m_06955ccd41c7fa": "Lugn dag",
   "m_0695ec21e87e93": "Premiär för den senast sända ordinarie säsongen; okända datum sist",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "Förfrågningar",
   "m_06971389277796": "Läs klusterguiden",
   "m_069833363c2729": "Tittarens språk",
@@ -8846,6 +8848,7 @@
   "m_1f042646ff05b1": "Finns inte på den här servern",
   "m_1f047dc5ead0d8": "Alltid cachad debrid",
   "m_1f04bba1d18793": "Titta på Ether i din webbläsare.",
+  "m_1f04c9cc3e7caf": "Välj webbspelare",
   "m_1f052ad34a44c4": "Mest sedda serier",
   "m_1f0537ed22aaca": "{rate} MB/s",
   "m_1f058562a0ddb3": "Återuppta matchning",

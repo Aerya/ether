@@ -3708,6 +3708,15 @@ export function createFakeServer(opts: FakeOptions = {}) {
         return state.config.availability?.monitor
           ? json(null, 202)
           : err(409, "disabled", "Enable release monitoring first");
+      case "GET /web-player":
+      case "POST /web-player": {
+        const players = [
+          { id: "vela", url: `${window.location.origin}/vela/` },
+          { id: "jellyfin", url: `${window.location.origin}/jellyfin/web/ether-signin` },
+        ];
+        const target = players.find((player) => player.id === q.get("app")) ?? players[1]!;
+        return json({ available: true, players, url: target.url });
+      }
       case "GET /bootstrap":
       case "GET /health":
         return json(state.boot);

@@ -452,6 +452,7 @@
   "m_01a9f3f1e1f405": "De plugin bedient deze bibliotheek zelf in plaats van via de apps hierboven.",
   "m_01aac44b990a0a": "Controleer de AI-suggesties. Het vertrouwen is een schatting.",
   "m_01adfbaf6437be": "Vanaf uur",
+  "m_01aec828db9a82": "Jellyfin web",
   "m_01af9435193543": {
     "one": "Eén keer per uur per kijker",
     "other": "Eén keer per {count} uur per kijker"
@@ -1880,6 +1881,7 @@
   "m_06945a6347e207": "Statistieken",
   "m_06955ccd41c7fa": "Rustige dag",
   "m_0695ec21e87e93": "Première van het laatst uitgezonden reguliere seizoen; onbekende datums komen laatst",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "Verzoeken",
   "m_06971389277796": "De clustergids lezen",
   "m_069833363c2729": "Taal van de kijker",
@@ -8846,6 +8848,7 @@
   "m_1f042646ff05b1": "Niet op deze server",
   "m_1f047dc5ead0d8": "Altijd gecachte debrid",
   "m_1f04bba1d18793": "Bekijk Ether in je browser.",
+  "m_1f04c9cc3e7caf": "Webspeler kiezen",
   "m_1f052ad34a44c4": "Meest bekeken series",
   "m_1f0537ed22aaca": "{rate} MB/s",
   "m_1f058562a0ddb3": "Koppelen hervatten",

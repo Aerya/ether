@@ -460,6 +460,7 @@
   "m_01a9f3f1e1f405": "Il plugin serve questa libreria da solo invece che tramite le app sopra.",
   "m_01aac44b990a0a": "Controlla i suggerimenti dell’IA. L’affidabilità è una stima.",
   "m_01adfbaf6437be": "Dall'ora",
+  "m_01aec828db9a82": "Jellyfin web",
   "m_01af9435193543": {
     "many": "Una volta ogni {count} ore per spettatore",
     "one": "Una volta all'ora per spettatore",
@@ -1924,6 +1925,7 @@
   "m_06945a6347e207": "Statistiche",
   "m_06955ccd41c7fa": "Giornata tranquilla",
   "m_0695ec21e87e93": "Prima puntata dell'ultima stagione regolare andata in onda; le date sconosciute vanno in fondo",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "Richieste",
   "m_06971389277796": "Leggi la guida al cluster",
   "m_069833363c2729": "Lingua dello spettatore",
@@ -9071,6 +9073,7 @@
   "m_1f042646ff05b1": "Non presente su questo server",
   "m_1f047dc5ead0d8": "Sempre debrid in cache",
   "m_1f04bba1d18793": "Guarda Ether nel tuo browser.",
+  "m_1f04c9cc3e7caf": "Scegli il lettore web",
   "m_1f052ad34a44c4": "Serie più viste",
   "m_1f0537ed22aaca": "{rate} MB/s",
   "m_1f058562a0ddb3": "Riprendi abbinamento",

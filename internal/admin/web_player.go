@@ -49,15 +49,19 @@ func (h *Handler) webPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	infos, err := h.deps.Frontends.List(r.Context())
-	origin := ""
+	origins := map[string]string{}
 	if err == nil {
 		for _, info := range infos {
-			if target == "vela" {
-				if info.Descriptor.ID == "vela" && info.Enabled && info.Status.Mounted && info.Status.WebPlayerReady {
+			origin := ""
+			if info.Descriptor.ID == "vela" {
+				if info.Enabled && info.Status.Mounted && info.Status.WebPlayerReady {
 					scheme, host, valid := requestOrigin(r, h.proxyPrefixes())
 					if valid {
-						origin = originURL(scheme, host, "/vela")
+						origin = originURL(scheme, host, "/vela/")
 					}
+				}
+				if origin != "" {
+					origins["vela"] = origin
 				}
 				continue
 			}
@@ -100,14 +104,36 @@ func (h *Handler) webPlayer(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			if origin != "" {
+				origins["jellyfin"] = origin + "/web/ether-signin"
+			}
 		}
 	}
-	if origin == "" {
+	if r.URL.Query().Get("app") == "" && origins[target] == "" {
+		target = "vela"
+	}
+	if origins[target] == "" {
 		writeError(w, 503, "unavailable", "Web player unavailable")
 		return
 	}
+	type player struct {
+		ID  string `json:"id"`
+		URL string `json:"url"`
+	}
+	players := func(code string) []player {
+		out := make([]player, 0, 2)
+		for _, id := range []string{"vela", "jellyfin"} {
+			if origin := origins[id]; origin != "" {
+				if code != "" {
+					origin += "#code=" + url.QueryEscape(code)
+				}
+				out = append(out, player{ID: id, URL: origin})
+			}
+		}
+		return out
+	}
 	if r.Method == http.MethodGet {
-		writeJSON(w, 200, map[string]bool{"available": true})
+		writeJSON(w, 200, map[string]any{"available": true, "players": players("")})
 		return
 	}
 	if !csrfOK(r) {
@@ -119,9 +145,5 @@ func (h *Handler) webPlayer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "unavailable", "Sign-in unavailable")
 		return
 	}
-	path := "/web/ether-signin"
-	if target == "vela" {
-		path = ""
-	}
-	writeJSON(w, 200, map[string]string{"url": origin + path + "#code=" + url.QueryEscape(code)})
+	writeJSON(w, 200, map[string]any{"url": origins[target] + "#code=" + url.QueryEscape(code), "players": players(code)})
 }

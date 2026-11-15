@@ -452,6 +452,7 @@
   "m_01a9f3f1e1f405": "Pluginnet betjener selv biblioteket i stedet for via apps ovenfor.",
   "m_01aac44b990a0a": "Gennemgå AI-forslagene. Sikkerheden er et skøn.",
   "m_01adfbaf6437be": "Fra time",
+  "m_01aec828db9a82": "Jellyfin web",
   "m_01af9435193543": {
     "one": "Én gang i timen pr. seer",
     "other": "Én gang hver {count}. time pr. seer"
@@ -1880,6 +1881,7 @@
   "m_06945a6347e207": "Statistik",
   "m_06955ccd41c7fa": "Stille dag",
   "m_0695ec21e87e93": "Premiere på den senest sendte almindelige sæson; ukendte datoer til sidst",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "Forespørgsler",
   "m_06971389277796": "Læs cluster-guiden",
   "m_069833363c2729": "Seerens sprog",
@@ -8846,6 +8848,7 @@
   "m_1f042646ff05b1": "Ikke på denne server",
   "m_1f047dc5ead0d8": "Altid cachet debrid",
   "m_1f04bba1d18793": "Se Ether i din browser.",
+  "m_1f04c9cc3e7caf": "Vælg webafspiller",
   "m_1f052ad34a44c4": "Mest sete serier",
   "m_1f0537ed22aaca": "{rate} MB/s",
   "m_1f058562a0ddb3": "Genoptag matching",

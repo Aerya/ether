@@ -452,6 +452,7 @@
   "m_01a9f3f1e1f405": "Pluginen betjener biblioteket selv i stedet for via appene ovenfor.",
   "m_01aac44b990a0a": "Se gjennom KI-forslagene. Sikkerheten er et anslag.",
   "m_01adfbaf6437be": "Fra klokkeslett",
+  "m_01aec828db9a82": "Jellyfin web",
   "m_01af9435193543": {
     "one": "Én gang i timen per seer",
     "other": "Én gang hver {count}. time per seer"
@@ -1880,6 +1881,7 @@
   "m_06945a6347e207": "Statistikk",
   "m_06955ccd41c7fa": "Rolig dag",
   "m_0695ec21e87e93": "Premiere for den siste sendte ordinære sesongen; ukjente datoer sist",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "Forespørsler",
   "m_06971389277796": "Les klyngeveiledningen",
   "m_069833363c2729": "Seerens språk",
@@ -8846,6 +8848,7 @@
   "m_1f042646ff05b1": "Ikke på denne serveren",
   "m_1f047dc5ead0d8": "Alltid bufret debrid",
   "m_1f04bba1d18793": "Se Ether i nettleseren din.",
+  "m_1f04c9cc3e7caf": "Velg nettspiller",
   "m_1f052ad34a44c4": "Mest sette serier",
   "m_1f0537ed22aaca": "{rate} MB/s",
   "m_1f058562a0ddb3": "Fortsett kobling",

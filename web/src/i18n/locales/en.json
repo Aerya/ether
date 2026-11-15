@@ -452,6 +452,7 @@
   "m_01a9f3f1e1f405": "The plugin serves this library itself instead of through the apps above.",
   "m_01aac44b990a0a": "AI suggestions need your review. Confidence is an estimate.",
   "m_01adfbaf6437be": "From hour",
+  "m_01aec828db9a82": "Jellyfin web",
   "m_01af9435193543": {
     "one": "Once an hour per viewer",
     "other": "Once every {count} hours per viewer"
@@ -1883,6 +1884,7 @@
   "m_06945a6347e207": "Statistics",
   "m_06955ccd41c7fa": "Quiet day",
   "m_0695ec21e87e93": "Premiere of the latest aired regular season; unknown dates last",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "Requests",
   "m_06971389277796": "Read the cluster guide",
   "m_069833363c2729": "Viewer's language",
@@ -8864,6 +8866,7 @@
   "m_1f042646ff05b1": "Not on this server",
   "m_1f047dc5ead0d8": "Always cached debrid",
   "m_1f04bba1d18793": "Watch Ether in your browser.",
+  "m_1f04c9cc3e7caf": "Choose web player",
   "m_1f052ad34a44c4": "Top shows",
   "m_1f0537ed22aaca": "{rate} MB/s",
   "m_1f058562a0ddb3": "Resume matching",
