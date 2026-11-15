@@ -184,10 +184,18 @@ func buildArgs(s runSpec) []string {
 			}
 		}
 		if s.RTXTimeline {
-			// Both HLS and its child TS muxer must preserve timestamps: the
-			// child otherwise shifts a zero-origin B-frame run to positive DTS.
+			// Copied audio keeps the native clock unchanged. Encoded audio
+			// instead needs the shared priming shift below, even at zero delay.
 			args = append(args, "-muxdelay", "0", "-muxpreload", "0")
-			segmentOptions = append(segmentOptions, "mpegts_copyts=1", "avoid_negative_ts=disabled")
+			segmentOptions = append(segmentOptions, "mpegts_copyts=1")
+			if !s.encodesAudio() {
+				segmentOptions = append(segmentOptions, "avoid_negative_ts=disabled")
+			}
+		}
+		if s.encodesAudio() {
+			// Normalize in the child muxer, including zero-delay RTX fallback.
+			// Otherwise encoder priming can wrap into the 33-bit TS clock.
+			segmentOptions = append(segmentOptions, "avoid_negative_ts=make_non_negative")
 		}
 		if s.Start > 0 || (s.LiveInput && s.StartSeg > 0) {
 			// A new muxer resets each PID's continuity counter. Mark that reset
@@ -900,6 +908,12 @@ func h264ReorderFrames(s runSpec) int {
 	return delay
 }
 
+// encodesAudio includes synthetic silence, which replaces even a copied track
+// with an encoder and therefore introduces codec priming too.
+func (s runSpec) encodesAudio() bool {
+	return (!s.Decision.AudioCopy || s.SilenceAudio) && findStream(s.Info, s.Decision.AudioStream, "audio") != nil
+}
+
 // hlsMuxArgs is the HLS muxer part of a run's command line.
 func hlsMuxArgs(s runSpec) []string {
 	segDur := s.SegDur
@@ -949,10 +963,12 @@ func hlsMuxArgs(s runSpec) []string {
 			// inner timestamp policy below preserve the absolute clock.
 			options += ":use_editlist=0"
 		}
-		if s.NormalizeNegativeDTS || audioOnlyAAC {
+		if s.NormalizeNegativeDTS || audioOnlyAAC || s.encodesAudio() {
 			// The inner MP4 muxer's automatic timestamp policy otherwise
 			// rebases positive audio starts too. Shift only negative priming
 			// at title zero; preserve positive seek timestamps unchanged.
+			// This is muxer-wide: video and audio move together, preserving
+			// sync for any encoder delay (not just AAC's 1024 samples).
 			options += ":avoid_negative_ts=make_non_negative"
 		}
 		if s.VideoTimescale != 0 {
