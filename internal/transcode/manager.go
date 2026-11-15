@@ -972,6 +972,7 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		softSubtitleStream = &index
 	}
 	s := &Session{
+		mediaGeneration:         randomHex(16),
 		serialRungs:             req.QualityRungs,
 		androidMatroskaHLS:      d.AndroidMatroskaHLS,
 		healTimestamps:          healTimestamps,

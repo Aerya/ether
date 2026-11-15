@@ -32,7 +32,7 @@ func TestMatroskaNativeRenditionsCannotReplaceActiveEncoderDuringProbes(t *testi
 	}
 	for _, rung := range []string{"1080p8m", "720p4m", "480p1500k", "360p800k"} {
 		rec := httptest.NewRecorder()
-		s.ServeRungSegment(rec, httptest.NewRequest("GET", "/header", nil), rung, InitSegment)
+		s.ServeRungSegment(rec, mediaRequest(s, httptest.NewRequest("GET", "/header", nil), InitSegment), rung, InitSegment)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("unadvertised rung %s = %d", rung, rec.Code)
 		}
@@ -192,7 +192,7 @@ func TestLadderSessionLazyRungStart(t *testing.T) {
 	}
 	// A segment on the lower rung lazily switches the one encoder there.
 	rec = httptest.NewRecorder()
-	s.ServeRungSegment(rec, httptest.NewRequest(http.MethodGet, "/720p4m/00010.ts", nil), "720p4m", 10)
+	s.ServeRungSegment(rec, mediaRequest(s, httptest.NewRequest(http.MethodGet, "/720p4m/00010.ts", nil), 10), "720p4m", 10)
 	if rec.Code != 200 || !strings.HasPrefix(rec.Body.String(), "segment 10") {
 		t.Fatalf("rung segment 10: %d %q", rec.Code, rec.Body.String())
 	}
@@ -205,7 +205,7 @@ func TestLadderSessionLazyRungStart(t *testing.T) {
 	}
 	// Unknown rung 404s.
 	rec = httptest.NewRecorder()
-	s.ServeRungSegment(rec, httptest.NewRequest(http.MethodGet, "/x", nil), "nope", 0)
+	s.ServeRungSegment(rec, mediaRequest(s, httptest.NewRequest(http.MethodGet, "/x", nil), 0), "nope", 0)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown rung: %d", rec.Code)
 	}
@@ -264,7 +264,7 @@ func TestRungSwitchWaitsOutDwell(t *testing.T) {
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		rec := httptest.NewRecorder()
-		s.ServeRungSegment(rec, httptest.NewRequest(http.MethodGet, "/720p4m/00000.ts", nil), "720p4m", 0)
+		s.ServeRungSegment(rec, mediaRequest(s, httptest.NewRequest(http.MethodGet, "/720p4m/00000.ts", nil), 0), "720p4m", 0)
 		done <- rec
 	}()
 	time.Sleep(150 * time.Millisecond)
@@ -423,7 +423,7 @@ func TestMSELazyContinuousRenditions(t *testing.T) {
 	rungs := s.Rungs()
 	chosen := rungs[len(rungs)-1].ID
 	rec := httptest.NewRecorder()
-	s.ServeRungSegment(rec, httptest.NewRequest("GET", "/"+chosen+"/init.mp4", nil), chosen, InitSegment)
+	s.ServeRungSegment(rec, mediaRequest(s, httptest.NewRequest("GET", "/"+chosen+"/init.mp4", nil), InitSegment), chosen, InitSegment)
 	if rec.Code != 200 || fr.startCount() != 1 {
 		t.Fatalf("selected init status=%d starts=%d", rec.Code, fr.startCount())
 	}

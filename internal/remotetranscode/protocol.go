@@ -115,6 +115,7 @@ type message struct {
 	Identity       Identity
 	Renewal        *Renewal `json:",omitempty"`
 	Start          *Start   `json:",omitempty"`
+	MediaName      string   `json:",omitempty"`
 	Segment        int      `json:",omitempty"`
 	Rung           string   `json:",omitempty"`
 	Representation int      `json:",omitempty"`

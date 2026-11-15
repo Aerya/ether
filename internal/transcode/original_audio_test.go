@@ -63,7 +63,7 @@ func checkOriginalAudioRendition(t *testing.T, ctx context.Context, e *realEnv, 
 	hs.ServePlaylist(rec, httptest.NewRequest(http.MethodGet, "/index.m3u8", nil))
 	playlist := rec.Body.String()
 	if rec.Code != http.StatusOK || !strings.Contains(playlist, "#EXT-X-TARGETDURATION:2\n") ||
-		!strings.Contains(playlist, `#EXT-X-MAP:URI="init.mp4"`) || strings.Contains(playlist, "BYTERANGE") {
+		!strings.Contains(playlist, `#EXT-X-MAP:URI="`+hs.(*Session).scopeMediaName(InitSegmentName)+`"`) || strings.Contains(playlist, "BYTERANGE") {
 		t.Fatalf("audio playlist violates native client contract: %s", playlist)
 	}
 	entries := parseFFmpegPlaylist(rec.Body.Bytes()).entries

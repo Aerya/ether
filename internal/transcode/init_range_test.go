@@ -144,7 +144,7 @@ func TestHLSInitRangeStartsInactiveRung(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/360p800k/init.mp4", nil)
 	req.Header.Set("Range", "bytes=0-")
 	rec := httptest.NewRecorder()
-	s.ServeRungSegment(rec, req, "360p800k", InitSegment)
+	s.ServeRungSegment(rec, mediaRequest(s, req, InitSegment), "360p800k", InitSegment)
 	if rec.Code != http.StatusPartialContent {
 		t.Fatalf("ranged init of inactive rung: status=%d body=%q, want 206", rec.Code, rec.Body.String())
 	}

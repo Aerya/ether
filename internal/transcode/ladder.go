@@ -375,6 +375,9 @@ func (s *Session) ServeRungPlaylist(w http.ResponseWriter, r *http.Request, rung
 
 // ServeRungSegment implements core.HLSLadderSession.
 func (s *Session) ServeRungSegment(w http.ResponseWriter, r *http.Request, rungID string, n int) {
+	if !s.acceptMediaGeneration(w, r) {
+		return
+	}
 	s.mu.Lock()
 	t := s.rungTrack(rungID)
 	s.mu.Unlock()

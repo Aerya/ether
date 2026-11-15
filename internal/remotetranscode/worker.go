@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -276,7 +277,17 @@ func (w *Worker) ServeHTTP(out http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Only these request headers reach the local session, never caller credentials.
+	if len(m.MediaName) > 128 || strings.ContainsAny(m.MediaName, "/\\?#\r\n") {
+		http.Error(out, "invalid media name", 400)
+		return
+	}
 	request := r.Clone(r.Context())
+	if m.MediaName != "" {
+		u := *request.URL
+		u.Path = "/" + m.MediaName
+		u.RawPath = ""
+		request.URL = &u
+	}
 	request.Method = "GET"
 	if m.Head {
 		request.Method = "HEAD"

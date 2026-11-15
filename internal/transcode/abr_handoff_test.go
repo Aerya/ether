@@ -48,7 +48,7 @@ func TestABRRungHandoff(t *testing.T) {
 					s.ServeMedia(w, r, track, n)
 				} else {
 					rungs := s.Rungs()
-					s.ServeRungSegment(w, r, rungs[track].ID, n)
+					s.ServeRungSegment(w, mediaRequest(s, r, n), rungs[track].ID, n)
 				}
 				return w
 			}
