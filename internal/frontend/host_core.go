@@ -90,6 +90,8 @@ var (
 	ErrPrepareSlow       = core.ErrPrepareSlow
 	ErrReleaseRejected   = core.ErrReleaseRejected
 	ErrSourceUnavailable = core.ErrSourceUnavailable
+	ErrSourceChanged     = core.ErrSourceChanged
+	ErrSeekUnavailable   = core.ErrSeekUnavailable
 	ErrUnreleased        = core.ErrUnreleased
 )
 

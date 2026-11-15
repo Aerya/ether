@@ -35,6 +35,24 @@ func TestOriginalPlaybackNegotiationAndGeneration(t *testing.T) {
 	if err != nil || d.Kind != core.DecisionDirectPlay || d.Reason != "original_runtime" || d.MaxHeight != 0 || d.BitrateKbps != 0 || d.ToneMap {
 		t.Fatalf("original budget altered: %+v %v", d, err)
 	}
+	// Original decoder admission uses observed codecs and the selected/default
+	// track. HEVC Main10 plus DTS remains playable with conversion disabled,
+	// even when an unselected commentary track uses another codec.
+	for _, selected := range []int{-1, 4} {
+		req := request
+		c := *runtime
+		c.AudioDecoders = []string{"dts"}
+		req.Intent.OriginalPlayback = &c
+		req.Intent.Options.AudioStream = selected
+		no := false
+		req.Intent.AllowTranscoding = &no
+		media := info
+		media.Streams = []core.StreamInfo{{Type: "video", Index: 0, Codec: "hevc", Profile: "Main 10", BitDepth: 10}, {Type: "audio", Index: 4, Codec: "dts"}, {Type: "audio", Index: 5, Codec: "aac"}}
+		d, err := b.decideProfile(&core.PlaySession{Info: media}, req)
+		if err != nil || d.Reason != "original_runtime" || d.AudioStream != 4 || d.AudioCodec != "dts" {
+			t.Fatalf("original DTS admission: %+v %v", d, err)
+		}
+	}
 	for _, change := range []func(*frontend.PlanRequest){
 		func(r *frontend.PlanRequest) { r.Intent.OriginalPlayback = nil },
 		func(r *frontend.PlanRequest) { c := *runtime; c.Version = 2; r.Intent.OriginalPlayback = &c },
@@ -82,6 +100,20 @@ func TestOriginalPlaybackNegotiationAndGeneration(t *testing.T) {
 	defer broker.Close(ctx)
 	viewer, device := &core.Viewer{ID: 1}, core.Device{ID: "runtime"}
 	request.Viewer, request.Device, request.Item = viewer, device, core.MovieKey(1)
+	// A rejected resolved source must release its pin and its owned session.
+	t.Run("rejected source lease", func(t *testing.T) {
+		rejected := request
+		rejected.Intent.OriginalPlayback = nil
+		rejected.Caps.Profiles = &core.ClientCapabilityProfiles{DirectPlay: []core.ClientDirectPlayProfile{}, Transcoding: []core.ClientTranscodeProfile{}}
+		_, err := broker.Plan(ctx, rejected)
+		var noPath *frontend.NoCompatiblePathError
+		if !errors.As(err, &noPath) || len(noPath.RejectedPaths) == 0 {
+			t.Fatalf("untyped rejection: %v", err)
+		}
+		if len(broker.plans) != 0 || len(broker.sessions) != 0 || len(broker.sourceLeases) != 0 || len(pb.sessions) != 0 || pb.pins != 0 {
+			t.Fatal("rejected source lingered")
+		}
+	})
 	plan, err := broker.Plan(ctx, request)
 	if err != nil || pb.pins != 1 || plan.ETag == "" {
 		t.Fatalf("plan %+v pins %d %v", plan, pb.pins, err)

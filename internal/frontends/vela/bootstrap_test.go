@@ -27,10 +27,17 @@ type idleBootstrapExperience struct {
 	*experience.RowViewService
 	db            *sql.DB
 	staleBackfill bool
+	revisionReads int
+	churn         int
 }
 
 func (f *idleBootstrapExperience) HomeRevision(ctx context.Context, _ *frontend.Viewer) (frontend.HomeRevision, bool, error) {
+	f.revisionReads++
 	epoch, err := viewerpolicy.Read(ctx, f.db)
+	if f.churn > 0 {
+		epoch += int64(f.churn)
+		f.churn--
+	}
 	return frontend.HomeRevision{Viewer: "idle", Policy: epoch}, true, err
 }
 func (f *idleBootstrapExperience) ResolveRowView(ctx context.Context, q frontend.RowViewPageRequest) (frontend.RowViewPage, error) {
@@ -167,6 +174,26 @@ func TestVelaIdleBootstrap(t *testing.T) {
 	if denied.Code == 200 || strings.Contains(denied.Body.String(), `"heroes"`) {
 		t.Fatal("cached Home survived a policy revocation")
 	}
+
+	// A moving revision is retried locally; continuous churn has a bounded,
+	// explicit client retry contract and never publishes a mixed snapshot.
+	valid = true
+	for _, churn := range []int{2, 100} {
+		inst.bootstraps = nil
+		source.churn, source.revisionReads = churn, 0
+		out := httptest.NewRecorder()
+		mounted.Handler().ServeHTTP(out, req)
+		if churn == 2 && out.Code != 200 {
+			t.Fatalf("settling revision: %d %s", out.Code, out.Body)
+		}
+		if churn == 100 && (out.Code != 409 || out.Header().Get("Retry-After") != "1" || !strings.Contains(out.Body.String(), `"code":"bootstrap_changed"`) || !strings.Contains(out.Body.String(), `"allowed":true`)) {
+			t.Fatalf("continuous revision: %d %s", out.Code, out.Body)
+		}
+		if source.revisionReads > 2*bootstrapAttempts {
+			t.Fatalf("unbounded assembly: %d revision reads", source.revisionReads)
+		}
+	}
+	source.churn = 0
 
 	// Unexpected failures must give the owner one useful, sanitized WARN.
 	valid = true

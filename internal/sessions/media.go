@@ -243,17 +243,17 @@ func (b *Broker) StartStream(ctx context.Context, a frontend.SessionAccess, id s
 		var allowed bool
 		dec, allowed = b.hlsOutputDecision(ps, s.caps, s.opts, s.allowTranscoding, dec)
 		if !allowed {
-			return "", core.ErrNotAvailable
+			return "", &frontend.NoCompatiblePathError{RejectedPaths: []frontend.RejectedPlaybackPath{{Path: string(req.Format), Reasons: []string{outputRejection(dec, ps.Info, s.allowTranscoding)}}}}
 		}
 	}
 	if s.allowTranscoding != nil && !*s.allowTranscoding && decisionEncodes(dec, ps.Info) {
-		return "", core.ErrNotAvailable
+		return "", &frontend.NoCompatiblePathError{RejectedPaths: []frontend.RejectedPlaybackPath{{Path: string(req.Format), Reasons: []string{outputRejection(dec, ps.Info, s.allowTranscoding)}}}}
 	}
 	if !profileDeliveryAllowed(s.caps.Profiles, dec, ps.Info, string(req.Format)) {
-		return "", core.ErrNotAvailable
+		return "", &frontend.NoCompatiblePathError{RejectedPaths: []frontend.RejectedPlaybackPath{{Path: string(req.Format), Reasons: []string{outputRejection(dec, ps.Info, s.allowTranscoding)}}}}
 	}
 	if dec.Kind == core.DecisionRemux && !s.opts.DirectStream {
-		return "", core.ErrNotAvailable
+		return "", &frontend.NoCompatiblePathError{RejectedPaths: []frontend.RejectedPlaybackPath{{Path: string(req.Format), Reasons: []string{outputRejection(dec, ps.Info, s.allowTranscoding)}}}}
 	}
 	request := core.HLSRequest{LazyStart: req.LazyStart, Diagnostics: req.Continuous, Continuous: req.Continuous, RequireIndependentProof: b.policy(s.public.Protocol).DistributedBindings, SessionID: id, ReleaseID: ps.SourceReleaseID(), InputURL: b.deps.Playback.InputURL(s.playID), Info: ps.Info, Decision: dec, StartOffset: req.Position, SegmentDuration: req.SegmentDuration, Protocol: proto}
 	if req.Continuous && s.public.Protocol == "vela" {

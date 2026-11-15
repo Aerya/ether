@@ -111,7 +111,44 @@ func fail(w http.ResponseWriter, err error, requests ...*http.Request) {
 		return
 	}
 
+	var incompatible *frontend.NoCompatiblePathError
+	var changed *bootstrapChangedError
 	switch {
+	case errors.As(err, &incompatible):
+		send(w, 422, object{"error": object{"class": "playback", "code": "no_compatible_path", "message": "no compatible playback path", "rejectedPaths": incompatible.RejectedPaths, "retry": object{"allowed": false}}})
+	case errors.As(err, &changed):
+		w.Header().Set("Retry-After", "1")
+		send(w, 409, object{"error": object{"class": "conflict", "code": "bootstrap_changed", "message": "home changed while loading", "retry": object{"allowed": true, "afterSeconds": 1, "maxAttempts": 3}}})
+	case errors.Is(err, frontend.ErrPolicyUnconfirmed):
+		problem(w, 403, "policy", "policy_unconfirmed")
+	case errors.Is(err, frontend.ErrUnreleased):
+		problem(w, 409, "source", "title_unreleased")
+	case errors.Is(err, frontend.ErrTrackNotFound):
+		problem(w, 422, "playback", "track_not_found")
+	case errors.Is(err, frontend.ErrDownloadNeedsTranscode), errors.Is(err, frontend.ErrSubtitleAuthoringUnavailable), errors.Is(err, frontend.ErrSubtitleFontsUnavailable):
+		problem(w, 422, "playback", "unsupported_conversion")
+	case errors.Is(err, frontend.ErrInvalidPreferences), errors.Is(err, frontend.ErrBadPlaylist), errors.Is(err, frontend.ErrPeopleQuery), errors.Is(err, frontend.ErrImageBatchLimit):
+		problem(w, 400, "request", "invalid_request")
+	case errors.Is(err, frontend.ErrPreferencesLimit), errors.Is(err, frontend.ErrDownloadBudget):
+		problem(w, 429, "capacity", "resource_capacity")
+	case errors.Is(err, frontend.ErrQuickConnectPending):
+		w.Header().Set("Retry-After", "2")
+		send(w, 409, object{"error": object{"class": "conflict", "code": "authorization_pending", "message": "authorization pending", "retry": object{"allowed": true, "afterSeconds": 2, "maxAttempts": 3}}})
+	case errors.Is(err, frontend.ErrIdentityUnavailable):
+		problem(w, 403, "policy", "identity_unavailable")
+	case errors.Is(err, context.Canceled):
+		problem(w, 408, "request", "request_canceled")
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, frontend.ErrPrepareSlow):
+		w.Header().Set("Retry-After", "2")
+		send(w, 503, object{"error": object{"class": "capacity", "code": "preparation_pending", "message": "preparation pending", "retry": object{"allowed": true, "afterSeconds": 2, "maxAttempts": 3}}})
+	case errors.Is(err, frontend.ErrBudgetExhausted):
+		problem(w, 429, "capacity", "indexer_budget_exhausted")
+	case errors.Is(err, frontend.ErrDownloadLimit), errors.Is(err, frontend.ErrDownloadPaused):
+		problem(w, 503, "capacity", "source_capacity")
+	case errors.Is(err, frontend.ErrDebridAuth):
+		problem(w, 502, "source", "source_authentication_failed")
+	case errors.Is(err, frontend.ErrDownloadQueued), errors.Is(err, frontend.ErrDownloadRefused), errors.Is(err, frontend.ErrNotCached), errors.Is(err, frontend.ErrReleaseRejected), errors.Is(err, frontend.ErrArticleCorrupt), errors.Is(err, frontend.ErrArticleMissing):
+		problem(w, 502, "source", "source_unavailable")
 	case errors.Is(err, frontend.ErrReceiptCapacity):
 		var capacity *frontend.ReceiptCapacityError
 		seconds := 1
@@ -125,9 +162,13 @@ func fail(w http.ResponseWriter, err error, requests ...*http.Request) {
 		send(w, 502, object{"error": object{"class": "source", "code": "track_source_unavailable", "message": "track source unavailable", "retry": object{"allowed": true, "afterSeconds": 2, "maxAttempts": 3}}})
 	case errors.Is(err, frontend.ErrInteractionReceipt):
 		problem(w, 400, "request", "invalid_receipt")
+	case errors.Is(err, frontend.ErrSourceChanged):
+		problem(w, 409, "conflict", "source_changed")
+	case errors.Is(err, frontend.ErrSeekUnavailable):
+		problem(w, 409, "playback", "seek_unavailable")
 	case errors.Is(err, frontend.ErrRowViewStale), errors.Is(err, frontend.ErrLiveGuideStale):
 		problem(w, 409, "conflict", "cursor_expired")
-	case errors.Is(err, frontend.ErrTranscodeCapacity), errors.Is(err, frontend.ErrStreamLimit), errors.Is(err, frontend.ErrSessionBusy):
+	case errors.Is(err, frontend.ErrTooManyTranscodes), errors.Is(err, frontend.ErrTranscodeCapacity), errors.Is(err, frontend.ErrStreamLimit), errors.Is(err, frontend.ErrSessionBusy):
 		var delay time.Duration
 		var busy *frontend.SessionBusyError
 		var encoder *frontend.TranscodeCapacityError
@@ -150,6 +191,8 @@ func fail(w http.ResponseWriter, err error, requests ...*http.Request) {
 		}
 	case errors.Is(err, frontend.ErrNoSources), errors.Is(err, frontend.ErrSourceUnavailable), errors.Is(err, frontend.ErrSourceGone):
 		problem(w, 502, "source", "source_unavailable")
+	case errors.Is(err, frontend.ErrNotAvailable):
+		problem(w, 409, "source", "not_available")
 	case errors.Is(err, frontend.ErrNotFound):
 		problem(w, 404, "not-found", "not_found")
 	case errors.Is(err, frontend.ErrUnauthorized):
