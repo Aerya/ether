@@ -28,8 +28,8 @@ func (s *Service) readyPeer(cands []candidate) int {
 }
 
 // validateReady races just the preferred release and its best cached peer.
-// Equal-ranked ready copies win immediately; a better rank or an explicit
-// routing decision gets one short, absolute budget (including discovery).
+// Equal-ranked ready copies get a brief scheduling grace; a better rank or an
+// explicit routing decision gets one short, absolute budget including discovery.
 // Existing checks are reused exactly.
 func (s *Service) validateReady(ctx context.Context, cands []candidate, tr *Trace, peer int) (int, []byte, error) {
 	var owned candidateChecks
@@ -85,7 +85,7 @@ func (s *Service) validateReady(ctx context.Context, cands []candidate, tr *Trac
 	budget := readySourceBudget
 	if cands[peer].rel.Score >= cands[0].rel.Score &&
 		!compareCandidates(cands[0], cands[peer]) && !cands[0].sourcePreferred {
-		// Give an equally ranked preferred check one scheduling turn. Otherwise
+		// Give an equally ranked preferred check a brief scheduling grace. Otherwise
 		// a sub-millisecond cached answer can win before it even starts.
 		// Real network checks still let an equal peer win as soon as ready.
 		budget = 10 * time.Millisecond
