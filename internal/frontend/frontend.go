@@ -456,6 +456,9 @@ type Host struct {
 	// ExtraStreams opens a playable trailer or extra. Nil means extras are not
 	// configured; listing routes still authorize the parent and return nothing.
 	ExtraStreams ExtraStreams
+	Themes       Themes
+	// ThemeTitle authorizes cached metadata without discovery or detail enrichment.
+	ThemeTitle func(context.Context, *Viewer, RatingKey) (*Title, error)
 	// DirectProxy selects the proxy for trailer fetches. Nil follows the
 	// process environment. The app wires the direct route so frontends do
 	// not import the egress policy.

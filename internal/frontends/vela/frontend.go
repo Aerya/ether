@@ -71,6 +71,7 @@ type instance struct {
 	assets       string
 	mu           sync.Mutex
 	previewRates map[int64]previewRate
+	themes       map[string]themeGrant
 	sessions     map[string]*playSession
 	replayMu     sync.Mutex
 	replays      map[string]*replay
@@ -360,6 +361,8 @@ func (i *instance) routes() {
 	i.route("GET", "/bootstrap", i.bootstrap)
 	i.route("GET", "/rows", i.rows)
 	i.route("GET", "/rows/{id}", i.rows)
+	i.route("GET", "/themes/{secret}/theme.m4a", i.theme)
+	i.route("HEAD", "/themes/{secret}/theme.m4a", i.theme)
 	i.route("GET", "/titles/{id}", i.detail)
 	i.route("GET", "/titles/{id}/children", i.children)
 	i.route("GET", "/titles/{id}/extras", i.detail)
@@ -398,7 +401,7 @@ func (i *instance) capabilities() object {
 	if source, ok := i.host.Identity.(frontend.AuthenticationFeatureSource); ok {
 		auth = source.AuthenticationFeatures()
 	}
-	return object{"protocolVersion": 0, "compatibleClientBuilds": object{"minInclusive": "0.1.0", "maxExclusive": "0.2.0"}, "server": object{"id": s.MachineID, "name": s.FriendlyName, "version": s.Version}, "features": object{"passwordSignIn": f(auth.Password), "deviceGrant": f(auth.QuickConnect && i.host.ViewerPortalURL != nil), "quickConnect": f(auth.QuickConnect), "descriptiveSearch": f(descriptive), "aiSearch": f(i.aiSearchAvailable()), "proactiveFallback": f(i.proactiveFallbackAvailable()), "liveTV": f(live), "extras": f(false), "initialTrackSelection": f(true), "audioFallback": f(i.audioFallbackAvailable()), "sessionTrackChanges": f(trackChanges), "extraPlayback": f(i.extraPlaybackAvailable()), "trailerPreview": f(i.previewAvailable())}, "skins": []object{{"id": "default", "name": "Vela"}}, "defaultSkinId": "default"}
+	return object{"protocolVersion": 0, "compatibleClientBuilds": object{"minInclusive": "0.1.0", "maxExclusive": "0.2.0"}, "server": object{"id": s.MachineID, "name": s.FriendlyName, "version": s.Version}, "features": object{"passwordSignIn": f(auth.Password), "deviceGrant": f(auth.QuickConnect && i.host.ViewerPortalURL != nil), "quickConnect": f(auth.QuickConnect), "descriptiveSearch": f(descriptive), "aiSearch": f(i.aiSearchAvailable()), "proactiveFallback": f(i.proactiveFallbackAvailable()), "liveTV": f(live), "extras": f(false), "initialTrackSelection": f(true), "audioFallback": f(i.audioFallbackAvailable()), "sessionTrackChanges": f(trackChanges), "extraPlayback": f(i.extraPlaybackAvailable()), "trailerPreview": f(i.previewAvailable()), "themeMusic": f(i.themeAvailable())}, "skins": []object{{"id": "default", "name": "Vela"}}, "defaultSkinId": "default"}
 }
 func (i *instance) negotiate(w http.ResponseWriter, r *http.Request) {
 	var b struct {

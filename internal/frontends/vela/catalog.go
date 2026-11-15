@@ -456,6 +456,9 @@ func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
+	if theme := i.detailTheme(r, t, d.Title); theme != nil {
+		ts[0]["themeMusic"] = theme
+	}
 	ts[0]["watch"] = watchWire(d.UserData)
 	cast, e := i.cast(r, t, d)
 	if e != nil {

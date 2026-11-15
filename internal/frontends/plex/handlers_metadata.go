@@ -270,6 +270,18 @@ func (s *Server) handleMetadata(w http.ResponseWriter, r *http.Request) {
 				pr.versionFlowKey = t.Key
 			}
 			md = s.detail(ctx, pr, t, metadataOptionOn(q.Get("includeChildren")), metadataOptionOn(q.Get("includeOnDeck")), metadataOptionOn(q.Get("includeRelated")), metadataOptionOn(q.Get("includeExtras")), q.Get("extraTypes"))
+			if len(keys) == 1 {
+				if s.host.Themes != nil && s.host.Themes.Theme(*t, true) {
+					md.Theme = "/library/metadata/" + t.Key.String() + "/theme/1"
+					if t.Type == frontend.TypeEpisode {
+						md.GrandparentTheme = md.Theme
+						md.ParentTheme = md.Theme
+					}
+					if t.Type == frontend.TypeSeason {
+						md.ParentTheme = md.Theme
+					}
+				}
+			}
 			if q.Get("includePreferences") == "1" {
 				md.Preferences = s.itemTrackPreferences(ctx, pr, t)
 			}
@@ -314,6 +326,7 @@ func (s *Server) detail(ctx context.Context, pr *Request, t *frontend.Title, chi
 	items := s.renderTitles(ctx, pr, ts, renderOpts{detail: true, media: true})
 	s.applyLeafCounts(ctx, pr, items, ts, memo)
 	md := items[0]
+
 	// Per-viewer decision header (#31); detail pages only, never lists.
 	s.decorateDetail(ctx, pr, t, &md)
 	if children && t.Type == frontend.TypeShow {
