@@ -247,6 +247,13 @@ func (s *Service) TuneWithSession(ctx context.Context, u *core.User, channelID s
 	if u == nil || (s.o.CanPlay != nil && !s.o.CanPlay(u, caps.Remote, s.o.Now())) {
 		return SessionInfo{}, core.ErrUnauthorized
 	}
+	if s.o.ConfirmAdmission != nil {
+		confirmed, err := s.o.ConfirmAdmission(ctx, u, caps.Remote, s.o.Now())
+		if err != nil {
+			return SessionInfo{}, err
+		}
+		u = confirmed
+	}
 	ctx, policy, err := s.withPolicy(ctx, u)
 	if err != nil {
 		return SessionInfo{}, err
@@ -662,6 +669,11 @@ func (s *Service) startIPTVSession(ctx context.Context, ss *session) error {
 }
 
 func writeStreamError(w http.ResponseWriter, err error) {
+	var bedtime *core.ErrBedtime
+	if errors.As(err, &bedtime) {
+		http.Error(w, bedtime.Error(), http.StatusForbidden)
+		return
+	}
 	code := http.StatusBadGateway
 	switch err {
 	case core.ErrNotFound:

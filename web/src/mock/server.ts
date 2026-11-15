@@ -4886,6 +4886,11 @@ export function createFakeServer(opts: FakeOptions = {}) {
         const rating = age === "preschool" ? "TV-Y" : age === "teens" ? "PG-13" : "PG";
         return json({
           maxContentRating: rating,
+          bedtime: {
+            time: age === "preschool" ? "19:00" : age === "teens" ? "22:00" : "20:00",
+            wakeTime: "06:00",
+            timezone: "",
+          },
           blockedGenres: null,
           blockedKeywords: ["pornography", "erotic movie"],
           remoteDisabled: false,

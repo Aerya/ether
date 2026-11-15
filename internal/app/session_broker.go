@@ -125,7 +125,7 @@ func (a *App) newSessionBroker(events *sessions.EventBus) (*sessions.Broker, err
 			}
 			return a.safety.UserPolicy(v), nil
 		},
-		CanPlay: a.safety.CanPlay, FreshPlay: a.safety.ConfirmPlayback, ReceiptCurrent: a.users.ReceiptCurrent, BitrateLimit: a.safety.BitrateLimit,
+		CanPlay: a.safety.CanPlay, FreshPlay: a.safety.ConfirmAdmission, CurrentPlay: a.safety.ConfirmPlayback, ReceiptCurrent: a.users.ReceiptCurrent, BitrateLimit: a.safety.BitrateLimit,
 		RemoteBitrateLimit: func() int { return a.cfg.Read().Transcode.RemoteMaxBitrateKbps },
 		OnTimeline: func(v *core.Viewer, key core.RatingKey, pos, dur time.Duration, playState string) {
 			if playState == "playing" && a.personalize != nil {
