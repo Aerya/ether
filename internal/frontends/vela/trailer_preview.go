@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/braedonsaunders/ether/internal/core"
 	"github.com/braedonsaunders/ether/internal/frontend"
 	"github.com/braedonsaunders/ether/internal/frontend/kit/caps"
 )
@@ -15,7 +14,7 @@ import (
 type previewRequestKey struct {
 	viewer        int64
 	scope, device string
-	item          core.RatingKey
+	item          frontend.RatingKey
 }
 
 type previewRequest struct {
