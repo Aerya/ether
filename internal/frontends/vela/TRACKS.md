@@ -65,3 +65,8 @@ Coordinator lab checks (no deployment/streaming performed by this worker):
   prepare reuses cached output, stop cleans up. Check MSE and native HLS Auto.
 - Repeat with original-file and transcode starts, allowTranscode=false (Original
   only), constrained decoder/size/bitrate caps, and exhausted encoder capacity.
+
+Window responses carry `X-Ether-Subtitle-Complete`. `0` means a growing window
+read from the live cue tee: keep polling as described above. `1` means the body
+is the complete track (cached extraction or sidecar file) with absolute cue
+times: stop polling that track for this generation.
