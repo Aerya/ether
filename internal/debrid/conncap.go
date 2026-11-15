@@ -88,7 +88,8 @@ func (c *connCap) wrap(next dialFunc) dialFunc {
 }
 
 type dialWaiter struct {
-	urgent func() bool
+	urgent  func() bool
+	granted bool
 }
 
 // Equal-priority dials keep FIFO order. Background dials resume as soon as
@@ -97,6 +98,7 @@ func (c *connCap) acquire(ctx context.Context, addr string) error {
 	w := &dialWaiter{urgent: func() bool { return gateUrgent(ctx) }}
 	c.mu.Lock()
 	c.waiters[addr] = append(c.waiters[addr], w)
+	c.signalLocked()
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -125,39 +127,44 @@ func (c *connCap) acquire(ctx context.Context, addr string) error {
 	}()
 	for {
 		c.mu.Lock()
+		if w.granted {
+			c.mu.Unlock()
+			return nil
+		}
 		if err := ctx.Err(); err != nil {
 			c.mu.Unlock()
 			return err
 		}
 		var until time.Time
 		lim, until = c.limitLocked(addr)
+		// Any awake waiter can grant the selected dial. Priority may change
+		// while that dial sleeps; progress cannot depend on it waking itself.
 		q := c.waiters[addr]
-		pick := q[0]
-		for _, candidate := range q {
-			if candidate.urgent() {
-				pick = candidate
-				break
-			}
-		}
-		if c.open[addr] < lim && pick == w {
-			wait := c.nextDial[addr].Sub(c.now())
-			if wait <= 0 {
-				c.open[addr]++
-				if c.dialGap > 0 {
-					c.nextDial[addr] = c.now().Add(c.dialGap)
+		if c.open[addr] < lim && !c.now().Before(c.nextDial[addr]) {
+			pick := 0
+			for i, candidate := range q {
+				if candidate.urgent() {
+					pick = i
+					break
 				}
+			}
+			chosen := q[pick]
+			c.waiters[addr] = append(q[:pick:pick], q[pick+1:]...)
+			chosen.granted = true
+			c.open[addr]++
+			if c.dialGap > 0 {
+				c.nextDial[addr] = c.now().Add(c.dialGap)
+			}
+			c.signalLocked()
+			if chosen == w {
 				c.mu.Unlock()
 				return nil
 			}
-			c.mu.Unlock()
-			t := time.NewTimer(wait)
-			select {
-			case <-t.C:
-			case <-ctx.Done():
-				t.Stop()
-				return ctx.Err()
-			}
-			continue
+		}
+		// A spare slot gets a timer even when another waiter is currently
+		// selected. When it expires we can grant a newly promoted sleeper.
+		if c.open[addr] < lim {
+			until = c.nextDial[addr]
 		}
 		freed := c.freed
 		c.mu.Unlock()
@@ -169,7 +176,7 @@ func (c *connCap) acquire(ctx context.Context, addr string) error {
 		var restored <-chan time.Time
 		var t *time.Timer
 		if !until.IsZero() {
-			// The cap rises when the cooldown ends, even if nothing closes.
+			// Wake for dial spacing or cap restoration, even if nothing closes.
 			t = time.NewTimer(until.Sub(c.now()))
 			restored = t.C
 		}
@@ -180,7 +187,7 @@ func (c *connCap) acquire(ctx context.Context, addr string) error {
 			if t != nil {
 				t.Stop()
 			}
-			return ctx.Err()
+			continue // recheck a grant racing with cancellation under c.mu
 		}
 		if t != nil {
 			t.Stop()

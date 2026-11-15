@@ -594,12 +594,13 @@ type remoteFile struct {
 	mediaPauseKey   string
 	mediaPause      mediaPause
 
-	bmu     sync.Mutex
-	flights map[int64]*blockFlight
-	mem     *lru.Cache[int64, []byte]
-	edges   map[int64][]byte // bounded head/tail, retained independently of streaming LRU
-	stored  map[int64]bool
-	tput    float64 // bytes/s EWMA
+	bmu      sync.Mutex
+	flights  map[int64]*blockFlight
+	mem      *lru.Cache[int64, []byte]
+	edges    map[int64][]byte // bounded head/tail, retained independently of streaming LRU
+	stored   map[int64]bool
+	tput     float64      // bytes/s EWMA
+	playback atomic.Int64 // live source handles that have served foreground reads
 
 	conns   chan struct{} // all requests
 	raSlots chan struct{} // read-ahead and prefetch (leaves one connection for urgent reads)
@@ -1125,8 +1126,10 @@ func (f *remoteFile) block(ctx context.Context, idx int64, mode fetchMode, runBl
 			return d, nil
 		}
 		fl := f.flights[idx]
-		if fl != nil && mode == fetchUrgent && fl.mode != fetchUrgent && fl.first < idx {
-			// A prefetch/read-ahead run started earlier in the file has
+		if fl != nil && mode == fetchUrgent && fl.mode == fetchPrefetch && fl.first < idx {
+			// Playback read-ahead is joined even at a later block: stealing
+			// its tail duplicates bytes and strands its warm connection.
+			// A prefetch run started earlier in the file has
 			// claimed this block but has not reached it. Waiting would
 			// fill sequentially up to the offset. Steal this block and
 			// the unread tail so the urgent GET can cover a full window.
@@ -1467,7 +1470,7 @@ func (f *remoteFile) isRateLimited() bool {
 
 // prefetch warms byte ranges into the cache with bounded concurrency.
 func (f *remoteFile) prefetch(ctx context.Context, ranges [][2]int64) error {
-	if f.isRateLimited() {
+	if f.playback.Load() > 0 || f.isRateLimited() {
 		return nil
 	}
 	maxRun, _, _ := f.e.tuning()
@@ -1491,6 +1494,9 @@ func (f *remoteFile) prefetch(ctx context.Context, ranges [][2]int64) error {
 				defer wg.Done()
 				// Wait for the whole run, not just its first block.
 				for i := idx; i < idx+n; i++ {
+					if f.playback.Load() > 0 {
+						return // let a running range finish, but start no competing runs
+					}
 					f.bmu.Lock()
 					fl, stored := f.flights[i], f.presentOnDiskLocked(i)
 					f.bmu.Unlock()
@@ -2219,6 +2225,7 @@ type httpSource struct {
 	raCtx    context.Context
 	raCancel context.CancelFunc
 	closed   bool
+	playing  bool // counted in f.playback until Close
 }
 
 func (s *httpSource) Size() int64       { return s.f.size }
@@ -2271,6 +2278,9 @@ func (s *httpSource) Close() error {
 		return nil
 	}
 	s.closed = true
+	if s.playing {
+		s.f.playback.Add(-1)
+	}
 	s.raCancel()
 	s.mu.Unlock()
 	s.f.e.releaseFile(s.f)
@@ -2340,28 +2350,44 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 		runLen = min(maxRun, max(1, lastBlock-first+1))
 	}
 	var liveRun context.Context
+	readComplete := false
 	if live {
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()
 			return 0, errors.New("debrid: read on closed source")
 		}
+		if !s.playing && callerUrgent(ctx) {
+			s.playing = true
+			f.playback.Add(1)
+		}
 		// A short forward skip onto blocks read-ahead already holds or is
 		// fetching keeps those runs; anything else is a seek.
 		sequential := s.last >= 0 && first >= s.last && first <= s.last+2
-		if !sequential && s.last >= 0 && first > s.last {
+		if !sequential {
 			f.bmu.Lock()
+			// Overlapping forward HTTP requests may arrive out of order.
+			// A cached or in-flight block needs no new seek connection,
+			// including when it is just behind the latest request.
 			sequential = f.presentLocked(first)
 			f.bmu.Unlock()
 		}
 		// A seek, or the first read far from the head: drop speculative
 		// fills of the start of the file and take a connection now.
 		far := first > 2
-		if !sequential && (s.last >= 0 || far) {
+		seek := !sequential && (s.last >= 0 || far)
+		if seek {
 			s.raCancel()
 			s.raCtx, s.raCancel = context.WithCancel(f.ctx)
 			f.beginUrgentSeek()
-			defer f.endUrgentSeek()
+			defer func() {
+				f.endUrgentSeek()
+				// New-position runs must not subscribe to the seek that
+				// just yielded the old ones.
+				if readComplete {
+					s.readAhead(lastBlock)
+				}
+			}()
 		}
 		if sequential {
 			runLen = min(maxRun, 4)
@@ -2379,7 +2405,9 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 		s.mu.Unlock()
 		// Start read-ahead past this read before blocking, so the burst
 		// runs in parallel with the request for the bytes asked for.
-		s.readAhead(lastBlock)
+		if !seek {
+			s.readAhead(lastBlock)
+		}
 	}
 	n := 0
 	for idx := first; idx <= lastBlock; idx++ {
@@ -2393,6 +2421,7 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 		}
 		n += copy(p[n:], data[from:])
 	}
+	readComplete = true
 	// Cached deliveries must keep a degraded route exploring too: a fully
 	// buffered reader may otherwise never complete another network fetch.
 	if n > 0 && live && !core.IsSpeculative(ctx) && !isAnalysisRead(ctx) {
