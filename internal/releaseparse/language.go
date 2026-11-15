@@ -330,3 +330,20 @@ func upperASCII(s string) string {
 	}
 	return string(b)
 }
+
+// StripTrailingLanguage removes one scene language token from a parsed title.
+// It is a fallback for identity gates handling previously parsed releases; it
+// deliberately uses the scene vocabulary rather than arbitrary language names.
+func StripTrailingLanguage(title string) (string, bool) {
+	title = strings.TrimSpace(title)
+	for _, tag := range languages {
+		at := len(title) - len(tag.token)
+		if at > 0 && title[at-1] == ' ' && strings.EqualFold(title[at:], tag.token) {
+			stripped := strings.TrimSpace(title[:at])
+			if stripped != "" {
+				return stripped, true
+			}
+		}
+	}
+	return title, false
+}
