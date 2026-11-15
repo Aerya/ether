@@ -452,6 +452,7 @@
   "m_01a9f3f1e1f405": "Laajennus palvelee kirjastoa itse yllä olevien sovellusten sijaan.",
   "m_01aac44b990a0a": "Tarkista tekoälyn ehdotukset. Luottamus on arvio.",
   "m_01adfbaf6437be": "Alkutunti",
+  "m_01aec828db9a82": "Jellyfin-verkkosoitin",
   "m_01af9435193543": {
     "one": "Kerran tunnissa katselijaa kohden",
     "other": "Kerran {count} tunnin välein katselijaa kohden"
@@ -1881,6 +1882,7 @@
   "m_06945a6347e207": "Tilastot",
   "m_06955ccd41c7fa": "Hiljainen päivä",
   "m_0695ec21e87e93": "Viimeisimmän esitetyn tavallisen tuotantokauden ensi-ilta; tuntemattomat päivämäärät viimeisenä",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "Pyynnöt",
   "m_06971389277796": "Lue klusteriopas",
   "m_069833363c2729": "Katsojan kieli",
@@ -8856,6 +8858,7 @@
   "m_1f042646ff05b1": "Ei tällä palvelimella",
   "m_1f047dc5ead0d8": "Aina välimuistissa oleva debrid",
   "m_1f04bba1d18793": "Katso Etheriä selaimessasi.",
+  "m_1f04c9cc3e7caf": "Valitse verkkosoitin",
   "m_1f052ad34a44c4": "Katsotuimmat sarjat",
   "m_1f0537ed22aaca": "{rate} Mt/s",
   "m_1f058562a0ddb3": "Jatka yhdistämistä",

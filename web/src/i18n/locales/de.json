@@ -452,6 +452,7 @@
   "m_01a9f3f1e1f405": "Das Plugin bedient diese Bibliothek selbst statt über die Apps oben.",
   "m_01aac44b990a0a": "Prüfen Sie die KI-Vorschläge. Die Konfidenz ist eine Schätzung.",
   "m_01adfbaf6437be": "Ab Uhrzeit",
+  "m_01aec828db9a82": "Jellyfin Web",
   "m_01af9435193543": {
     "one": "Einmal pro Stunde je Zuschauer",
     "other": "Alle {count} Stunden je Zuschauer"
@@ -1881,6 +1882,7 @@
   "m_06945a6347e207": "Statistiken",
   "m_06955ccd41c7fa": "Ruhiger Tag",
   "m_0695ec21e87e93": "Premiere der zuletzt ausgestrahlten regulären Staffel; unbekannte Daten zuletzt",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "Anfragen",
   "m_06971389277796": "Cluster-Anleitung lesen",
   "m_069833363c2729": "Sprache des Zuschauers",
@@ -8856,6 +8858,7 @@
   "m_1f042646ff05b1": "Nicht auf diesem Server",
   "m_1f047dc5ead0d8": "Immer zwischengespeichertes Debrid",
   "m_1f04bba1d18793": "Ether im Browser ansehen.",
+  "m_1f04c9cc3e7caf": "Webplayer auswählen",
   "m_1f052ad34a44c4": "Meistgesehene Serien",
   "m_1f0537ed22aaca": "{rate} MB/s",
   "m_1f058562a0ddb3": "Zuordnung fortsetzen",

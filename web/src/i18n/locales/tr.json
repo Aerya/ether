@@ -452,6 +452,7 @@
   "m_01a9f3f1e1f405": "Eklenti kitaplığı yukarıdaki uygulamalar yerine kendisi sunar.",
   "m_01aac44b990a0a": "Yapay zekâ önerilerini inceleyin. Güven düzeyi bir tahmindir.",
   "m_01adfbaf6437be": "Başlangıç saati",
+  "m_01aec828db9a82": "Jellyfin web",
   "m_01af9435193543": {
     "one": "Her izleyiciye saatte bir kez",
     "other": "Her izleyiciye {count} saatte bir kez"
@@ -1881,6 +1882,7 @@
   "m_06945a6347e207": "İstatistikler",
   "m_06955ccd41c7fa": "Sakin gün",
   "m_0695ec21e87e93": "Yayınlanmış son normal sezonun prömiyeri; bilinmeyen tarihler en sonda",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "İstekler",
   "m_06971389277796": "Küme kılavuzunu oku",
   "m_069833363c2729": "İzleyicinin dili",
@@ -8856,6 +8858,7 @@
   "m_1f042646ff05b1": "Bu sunucuda yok",
   "m_1f047dc5ead0d8": "Her zaman önbellekteki debrid",
   "m_1f04bba1d18793": "Ether’i tarayıcınızda izleyin.",
+  "m_1f04c9cc3e7caf": "Web oynatıcısı seç",
   "m_1f052ad34a44c4": "En çok izlenen diziler",
   "m_1f0537ed22aaca": "{rate} MB/sn",
   "m_1f058562a0ddb3": "Eşleştirmeyi sürdür",

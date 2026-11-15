@@ -468,6 +468,7 @@
   "m_01a9f3f1e1f405": "Plugin obsluhuje knihovnu sám místo přes aplikace výše.",
   "m_01aac44b990a0a": "Zkontrolujte návrhy AI. Míra jistoty je odhad.",
   "m_01adfbaf6437be": "Od hodiny",
+  "m_01aec828db9a82": "Jellyfin web",
   "m_01af9435193543": {
     "few": "Jednou za {count} hodiny pro každého diváka",
     "many": "Jednou za {count} hodiny pro každého diváka",
@@ -1969,6 +1970,7 @@
   "m_06945a6347e207": "Statistiky",
   "m_06955ccd41c7fa": "Klidný den",
   "m_0695ec21e87e93": "Premiéra nejnovější odvysílané běžné řady; neznámá data na konci",
+  "m_069640a0c63e8e": "Vela",
   "m_069654e7a53193": "Požadavky",
   "m_06971389277796": "Přečíst průvodce clusterem",
   "m_069833363c2729": "Jazyk diváka",
@@ -9309,6 +9311,7 @@
   "m_1f042646ff05b1": "Není na tomto serveru",
   "m_1f047dc5ead0d8": "Vždy debrid v mezipaměti",
   "m_1f04bba1d18793": "Sledujte Ether v prohlížeči.",
+  "m_1f04c9cc3e7caf": "Vybrat webový přehrávač",
   "m_1f052ad34a44c4": "Nejsledovanější seriály",
   "m_1f0537ed22aaca": "{rate} MB/s",
   "m_1f058562a0ddb3": "Pokračovat v přiřazování",
