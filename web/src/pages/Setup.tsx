@@ -12,7 +12,7 @@ import {
 } from "@braedonsaunders/appkit-ui";
 import { Check, ExternalLink, KeyRound, Newspaper, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAppOptional } from "../app-context";
 import { RestartButton } from "../components/RestartDrawer";
 import { EtherMark } from "../components/brand";
@@ -403,6 +403,9 @@ export function canAdvance(
 
 export default function Setup() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const resumePending = useRef(params.get("resume") === "1");
+  const [finishReview, setFinishReview] = useState(false);
   const app = useAppOptional();
   const [cfg, setCfg] = useState<EtherConfig | null>(null);
   const [languageChoice, setLanguageChoice] = useState<HouseholdLanguage | null>(null);
@@ -451,16 +454,6 @@ export default function Setup() {
           .catch(() => {});
       })
       .catch(() => {});
-    api
-      .setupStatus()
-      .then((s) => {
-        const catalog = s.steps.find((x) => x.id === "catalog");
-        setTmdbBundled(Boolean(catalog?.complete));
-        setCacheVolume(s.cacheVolume ?? "");
-        setServerSteps(Object.fromEntries(s.steps.map((step) => [step.id, step.complete])));
-        if (s.setupComplete && s.cacheRestartRequired) setCacheRestartRequired(true);
-      })
-      .catch(() => {});
   }, []);
   const [optTests, setOptTests] = useState<Record<string, TestState>>({});
   const [pin, setPin] = useState<{ id: string; code: string; authUrl: string } | null>(null);
@@ -492,10 +485,11 @@ export default function Setup() {
   const load = useCallback(() => {
     Promise.all([
       api.getConfig(),
+      api.setupStatus(),
       apiFetch<{ descriptor: { id: string; name: string } }[]>("/frontends").catch(() => null),
       apiFetch<Partial<StreamRules>>("/stream-preferences/0").catch(() => ({})),
     ])
-      .then(([c, list, rules]) => {
+      .then(([c, status, list, rules]) => {
         const catalog = appCatalog(list);
         setApps(catalog);
         setFrontends(
@@ -524,6 +518,24 @@ export default function Setup() {
               .filter((ix) => ix.id && ix.url.trim())
               .map((ix) => [ix.id, ix.url.trim()]),
           );
+        }
+        const catalogStep = status.steps.find((item) => item.id === "catalog");
+        setTmdbBundled(Boolean(catalogStep?.complete));
+        setCacheVolume(status.cacheVolume ?? "");
+        setServerSteps(Object.fromEntries(status.steps.map((item) => [item.id, item.complete])));
+        if (status.setupComplete && status.cacheRestartRequired) setCacheRestartRequired(true);
+        if (resumePending.current) {
+          // Server status is authoritative; a stored wizard position can be stale.
+          const missing = status.steps.find((item) => item.required && !item.complete);
+          if (missing) {
+            const id = missing.id === "plex" ? "account" : missing.id;
+            const next = wizardSteps(true).findIndex((item) => item.id === id);
+            if (next < 0) throw new Error(t("Finish the remaining setup step in Settings."));
+            setStep(next);
+          } else {
+            setFinishReview(true);
+          }
+          resumePending.current = false;
         }
         setCfg(c);
         setPinDone(Boolean(c.plex.token));
@@ -907,6 +919,32 @@ export default function Setup() {
         initialConfig={cfg}
         tmdbAvailable={tmdbBundled || Boolean(cfg.catalog?.tmdbKey?.trim())}
       />
+    );
+
+  if (finishReview)
+    return (
+      <div className="mx-auto w-full max-w-2xl space-y-4 p-6">
+        <EtherMark size={40} />
+        <h1 className="text-xl font-semibold">{t("Everything is set up")}</h1>
+        <p>{t("Finish setup to leave setup mode. Your settings are saved.")}</p>
+        <MutationError error={error} />
+        <Button
+          disabled={saving}
+          onClick={async () => {
+            setSaving(true);
+            setError(null);
+            try {
+              await finish(false);
+            } catch (e) {
+              setError(e);
+            } finally {
+              setSaving(false);
+            }
+          }}
+        >
+          {t("Finish setup")}
+        </Button>
+      </div>
     );
 
   return (
