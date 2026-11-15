@@ -66,6 +66,9 @@ type inputRelay struct {
 }
 
 type inputGrant struct {
+	variantCaps   core.ClientCaps // immutable input quality ceilings
+	variantLogged sync.Once
+
 	login        *loginLease
 	log          *slog.Logger // immutable, credential-free session correlation
 	token        string
@@ -219,7 +222,7 @@ func (s *Service) grantInputFor(ss *session, src StreamSource, headers http.Head
 	if ss.inputSource.ID != "" {
 		histSrc = ss.inputSource
 	}
-	g := &inputGrant{login: lease, reserve: reserve, lead: lead, steady: steady, service: s, histChannel: c.ID, histSrc: histSrc,
+	g := &inputGrant{variantCaps: core.ClientCaps{MaxHeight: ss.caps.MaxHeight, MaxBitrateKbps: ss.caps.MaxBitrateKbps}, login: lease, reserve: reserve, lead: lead, steady: steady, service: s, histChannel: c.ID, histSrc: histSrc,
 		log:   s.sessionLog(ss).With("input", src.ID),
 		token: base64.RawURLEncoding.EncodeToString(b[:]), origin: relayOrigin(u), headers: headers.Clone(), mediaHeaders: redirectMediaHeaders(src.Headers),
 		ctx: ctx, cancel: cancel, slots: make(chan struct{}, relayConcurrency), source: source,
@@ -557,6 +560,15 @@ func (s *Service) serveRelayManifest(w http.ResponseWriter, g *inputGrant, raw s
 		return
 	}
 	if hls {
+		if isMasterPlaylist(b) {
+			b = selectedHLSMaster(b, base, g.variantCaps)
+			g.variantLogged.Do(func() {
+				m := parseMasterPlaylist(b, base)
+				if v, ok := pickVariant(m, g.variantCaps); ok && g.log != nil {
+					g.log.Info("live HLS input variant selected", "height", v.height, "bandwidth", v.bandwidth, "audio", variantHasAudio(v), "separate_audio", m.demuxedAudio[v.audio], "max_height", g.variantCaps.MaxHeight, "max_bitrate_kbps", g.variantCaps.MaxBitrateKbps)
+				}
+			})
+		}
 		// Health, and for Steady the reserve window (reserve_hls.go).
 		var events []UpstreamEvent
 		h := g.hlsState()
