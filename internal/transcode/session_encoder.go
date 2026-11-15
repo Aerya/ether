@@ -275,6 +275,7 @@ func (s *Session) startRunLocked(seg int, bigProbe bool) error {
 	rampClock := len(s.rungs) <= 1 && s.plan != nil && s.plan.rampSegs > 0
 	spec := runSpec{
 		HealTimestamps:       s.healTimestamps,
+		CopyOrigin:           s.copyOrigin,
 		AuthoredTimeline:     len(s.rungs) > 1 || (s.plan != nil && s.plan.rampSegs > 0),
 		RampClock:            rampClock,
 		SilenceAudio:         s.silenceAudio,
@@ -614,7 +615,7 @@ func (s *Session) chunkedLocked(d core.Decision) bool {
 	if s.liveInput || s.isDASH() || s.plan == nil || s.info.Video() == nil {
 		return false
 	}
-	return s.plan.Keyframed() || d.VideoCopy || s.copyFallback || s.container == ContainerMatroska
+	return s.plan.shortOpening || s.plan.Keyframed() || d.VideoCopy || s.copyFallback || s.container == ContainerMatroska
 }
 
 // stopRunLocked detaches the current run immediately. Process reaping happens

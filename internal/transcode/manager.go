@@ -822,9 +822,34 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		}
 	}
 
+	// Continuous clients rebase their first video presentation packet to zero.
+	// Resolve the true copy origin before authoring the playlist and audio cut.
+	copyOrigin := req.Continuous && req.Info.Duration > 0 && proto == core.ProtocolHLS && d.VideoCopy && v != nil && !req.LiveInput && len(slateData) == 0 && req.Resume == nil && !enhancementSelected(d)
+	copyOpeningEnd := time.Duration(0)
+	if copyOrigin {
+		scope, err := encoderScopeHeaders(req.InputLease, req.InputURL)
+		if err != nil {
+			return nil, err
+		}
+		measured, next, err := m.continuousCopyOrigin(ctx, runSpec{Input: req.InputURL, InputHeaders: inputHeaders, InputScopeHeaders: scope, Info: req.Info, Start: offset})
+		if err != nil {
+			return nil, err
+		}
+		offset = measured
+		copyOpeningEnd = next
+	}
+
 	// HLS playlists start at the offset; a DASH MPD always spans the whole
 	// title and the first run starts at the offset's segment.
 	base, startSeg, total := offset, 0, 0
+	var opening []time.Duration
+	if req.Continuous && proto == core.ProtocolHLS && req.Resume == nil && req.Info.Duration > 0 && !req.LiveInput && v != nil && !enhancementSelected(d) {
+		if !d.VideoCopy {
+			opening = []time.Duration{500 * time.Millisecond, 500 * time.Millisecond, time.Second}
+		} else if copyOpeningEnd > base {
+			opening = []time.Duration{copyOpeningEnd - base}
+		}
+	}
 	if req.Resume != nil {
 		base = 0
 		startSeg = req.Resume.FirstSegment
@@ -865,7 +890,7 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		// an explained Plex-visible difference vs a 4s remux. Pure copy
 		// remux (audio copies too) stays on 4s so long-GOP MKV does not
 		// restart ffmpeg and replay frames.
-		if req.SegmentDuration <= 0 {
+		if req.SegmentDuration <= 0 && !req.Continuous {
 			if short := remuxOpenSegment(adapt, d, v); short > 0 {
 				segDur = short
 			}
@@ -888,6 +913,7 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		fastStart := !req.LiveInput && adapt.FastStart && v != nil && (!d.VideoCopy || (d.Container == ContainerMPEGTS && len(req.Info.Keyframes) > 0))
 		plan = buildTimeline(span, segDur, timelineOptions{
 			steadyMode:      steadyMode,
+			opening:         opening,
 			fastStart:       fastStart,
 			rampSegs:        adapt.RampSegs,
 			rampDur:         adapt.RampDur,
@@ -918,7 +944,7 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		sampledRamp := offset > 0 && rampBoundary
 		if sample.complete || sampledRamp {
 			req.Info.Keyframes = points
-			plan = buildTimeline(plan.span, segDur, timelineOptions{steadyMode: ModeCopy,
+			plan = buildTimeline(plan.span, segDur, timelineOptions{steadyMode: ModeCopy, opening: opening,
 				fastStart: rampBoundary, rampSegs: adapt.RampSegs, rampDur: adapt.RampDur,
 				keyframes: points, base: base, snap: true, strictKeyframes: d.AndroidMatroskaHLS && d.Container == ContainerMatroska && sample.complete})
 			total = plan.Total()
@@ -974,6 +1000,7 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 	s := &Session{
 		mediaGeneration:         randomHex(16),
 		serialRungs:             req.QualityRungs,
+		copyOrigin:              copyOrigin,
 		androidMatroskaHLS:      d.AndroidMatroskaHLS,
 		healTimestamps:          healTimestamps,
 		encoder:                 life,

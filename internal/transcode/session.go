@@ -27,6 +27,7 @@ import (
 type Session struct {
 	// Explicit quality sessions retire the old run before starting a rung.
 	serialRungs             bool
+	copyOrigin              bool // continuous copy uses a measured presentation origin
 	diagnosticsEnabled      bool
 	preparation             []core.HLSPreparationEvent
 	diagnosticRecords       []core.HLSDiagnosticRecord
@@ -469,3 +470,6 @@ func (s *Session) PlaybackDelivered() bool {
 	defer s.mu.Unlock()
 	return s.playbackDelivered
 }
+
+// TimelineOrigin is the title time represented by playlist time zero.
+func (s *Session) TimelineOrigin() time.Duration { return s.base }
