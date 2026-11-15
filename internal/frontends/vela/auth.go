@@ -36,7 +36,7 @@ func (i *instance) viewerPolicyWire(r *http.Request, v *frontend.Viewer, d front
 	if info.BedtimeState != nil {
 		out["bedtimeState"] = info.BedtimeState
 	}
-	out["policyRevision"] = hashJSON(object{"viewer": v, "policy": info.PolicyRevision})
+	out["policyRevision"] = hashJSON(object{"viewer": v, "policy": info.PolicyRevision, "bedtime": info.Bedtime})
 	return out, nil
 }
 func (i *instance) tokens(w http.ResponseWriter, r *http.Request, access, refresh string, d frontend.Device) {
