@@ -130,4 +130,60 @@ func TestTrailerPreviewPurposeIsolation(t *testing.T) {
 		t.Fatal("prepared focus did not become ready", ready, err)
 	}
 
+	t.Run("full trailer playback", func(t *testing.T) {
+		extra := core.ExtraKey(7)
+		b.deps.ExtraLookup = func(key core.RatingKey) (frontend.Extra, bool) {
+			return frontend.Extra{Key: extra, ParentKey: core.MovieKey(1), Kind: "trailer"}, key == extra
+		}
+		b.deps.ExtraSource = func(ctx context.Context, v *core.Viewer, title *core.Title, key core.RatingKey, lang string) (PreviewSource, error) {
+			if title.Key != core.MovieKey(1) || key != extra {
+				t.Fatal("wrong authorized parent/extra")
+			}
+			return b.deps.PreviewSource(ctx, v, title, lang)
+		}
+		extras := BindSurface(b, "jellyfin").(frontend.ExtraPlaybacks)
+		fullReq := req
+		fullReq.Item, fullReq.IdempotencyKey = extra, "explicit-play"
+		full, err := extras.ExtraPlayback(ctx, fullReq)
+		if err != nil || full.State != "ready" || full.Grant.Purpose != "playback" {
+			t.Fatal(full, err)
+		}
+		again, err := extras.ExtraPlayback(ctx, fullReq)
+		if err != nil || again.Grant.SessionID != full.Grant.SessionID {
+			t.Fatal("retry duplicated full session", again, err)
+		}
+		req.Item, req.IdempotencyKey = core.MovieKey(2), "focus-during-playback"
+		if _, err := previews.TrailerPreview(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(3 * time.Minute)
+		if code := serve(full.Grant, &access); code != 200 {
+			t.Fatal("full trailer was revoked by focus or preview expiry", code)
+		}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, full.Grant.URL, nil)
+		r.Header.Set("Range", "bytes=0-3")
+		b.ServeMediaAccess(w, r, access)
+		if w.Code != 206 || w.Body.String() != "prev" {
+			t.Fatal("trailer range seek failed", w.Code, w.Body.String())
+		}
+		for _, state := range []string{"playing", "paused", "playing", "ended"} {
+			if err := b.Report(ctx, access, full.Grant.SessionID, frontend.Timeline{State: state, Position: time.Minute}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if timeline != 0 || progress.calls != 0 || pb.prepares != 0 || pb.estimates != 0 {
+			t.Fatal("full trailer reached feature/history path")
+		}
+		if code := serve(full.Grant, &wrong); code != 404 {
+			t.Fatal("full trailer crossed viewers", code)
+		}
+		if err := b.Stop(ctx, access, full.Grant.SessionID); err != nil {
+			t.Fatal(err)
+		}
+		if code := serve(full.Grant, &access); code != 404 {
+			t.Fatal("stopped full trailer survived", code)
+		}
+	})
+
 }

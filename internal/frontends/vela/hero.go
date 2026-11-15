@@ -8,8 +8,10 @@ import (
 
 // heroSource is an internal sidecar, never a client-supplied or wire row name.
 type heroSource struct {
-	kind   string
-	pinned bool
+	kind           string
+	pinned         bool
+	previewDefault bool
+	previewPolicy  *bool
 }
 
 type heroCandidate struct {
@@ -200,7 +202,14 @@ func heroFromEntry(row, entry object, source heroSource) (heroCandidate, bool) {
 		return heroCandidate{}, false
 	}
 	hero := object{"title": title, "receiptToken": receipt, "reason": reason, "action": action}
-	if enabled, _ := row["previewOnFocus"].(bool); enabled {
+	enabled, _ := row["previewOnFocus"].(bool)
+	if source.previewDefault {
+		enabled = true
+	}
+	if source.previewPolicy != nil {
+		enabled = source.previewDefault && *source.previewPolicy
+	}
+	if enabled {
 		hero["previewOnFocus"] = true
 	}
 	return heroCandidate{hero: hero, personal: personal, pinned: source.pinned, playable: playable}, true
@@ -247,7 +256,7 @@ func (i *instance) heroFallback(r *http.Request, viewer *frontend.Viewer, token 
 				entries = append(entries, object{"kind": "title", "title": title, "receiptToken": entry.Handle})
 			}
 		}
-		sources[row.ID] = heroSource{kind: row.Kind, pinned: row.Layout.Always}
+		sources[row.ID] = heroSource{kind: row.Kind, pinned: row.Layout.Always, previewDefault: i.previewAvailable(), previewPolicy: row.Layout.PreviewOnFocusPolicy}
 		out = append(out, object{"id": row.ID, "purpose": row.Purpose, "previewOnFocus": row.PreviewOnFocus, "items": entries, "continuation": "exhausted"})
 	}
 	return out, nil

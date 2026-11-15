@@ -112,10 +112,12 @@ type RowDirectory struct {
 type RowLayout struct {
 	RankedTop10    bool
 	PreviewOnFocus bool
-	Order          int
-	Style          string
-	Paint          RowPaint
-	Always         bool
+	// PreviewOnFocusPolicy retains the owner override when a shelf becomes a hero.
+	PreviewOnFocusPolicy *bool
+	Order                int
+	Style                string
+	Paint                RowPaint
+	Always               bool
 }
 
 // RowPaint carries optional presentation colors and artwork references.

@@ -28,6 +28,8 @@ import (
 // BrokerDeps are the explicit dependencies shared by all protocol surfaces.
 type BrokerDeps struct {
 	PreviewAvailable func() bool
+	ExtraLookup      func(core.RatingKey) (frontend.Extra, bool)
+	ExtraSource      func(context.Context, *core.Viewer, *core.Title, core.RatingKey, string) (PreviewSource, error)
 	PreviewSource    func(context.Context, *core.Viewer, *core.Title, string) (PreviewSource, error)
 	SurfacePolicy    func(frontend.Protocol) core.SessionPolicy
 	// OnActualPlaying runs in a bounded worker after authenticated playing telemetry.
@@ -1059,10 +1061,12 @@ func (b *Broker) Sessions(ctx context.Context, a frontend.SessionAccess) ([]fron
 	b.mu.Lock()
 	liveness, checkLiveness := b.deps.Playback.(interface{ SessionActive(string) bool })
 	var out []frontend.Session
+	isolated := map[string]bool{}
 	b.prunePreviewsLocked()
 	for _, s := range b.previews {
 		if owner || s.public.ViewerID == v.ID {
 			out = append(out, s.public)
+			isolated[s.public.ID] = true
 		}
 	}
 	for _, s := range b.sessions {
@@ -1087,7 +1091,7 @@ func (b *Broker) Sessions(ctx context.Context, a frontend.SessionAccess) ([]fron
 	}
 	visible := out[:0]
 	for i := range out {
-		if out[i].Purpose != "preview" && b.cluster != nil && !b.policy(out[i].Protocol).ExternalAdmission {
+		if !isolated[out[i].ID] && out[i].Purpose != "preview" && b.cluster != nil && !b.policy(out[i].Protocol).ExternalAdmission {
 			active, err := b.cluster.store.current(ctx, out[i].ID)
 			if err != nil {
 				return nil, err

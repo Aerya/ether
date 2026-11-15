@@ -783,6 +783,9 @@ func (e *Engine) finalizeNeutralHome(ctx context.Context, user *core.User, situa
 	for _, row := range arranged {
 		if candidate, ok := byID[row.HubID]; ok {
 			candidate.PreviewOnFocus = row.Hub.PreviewOnFocus
+			if row.Policy != nil {
+				candidate.PreviewOnFocusPolicy = row.Policy.PreviewOnFocus
+			}
 			candidate.RankedTop10 = row.Hub.RankedTop10
 			candidate.Always = row.Policy != nil && row.Policy.Status == "always"
 			out = append(out, candidate)

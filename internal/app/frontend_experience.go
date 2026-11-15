@@ -201,7 +201,21 @@ func (a *App) newSurfaceExperience(protocol core.Protocol, artwork ...frontend.A
 		if req.HomeFallbackOnly {
 			layout = neutralLayoutFunc(a.personalize.FinalizeNeutralHomeFill)
 		}
-		return experience.LayoutRows(ctx, layout, libs, req, sit, rows)
+		extrasEnabled := a.extras != nil && a.extras.Enabled()
+		rows = append([]frontend.Row(nil), rows...)
+		for n := range rows {
+			if extrasEnabled && (rows[n].Style == "hero" || rows[n].Style == "featured") {
+				rows[n].PreviewOnFocus = true
+			}
+		}
+		arranged, err := experience.LayoutRows(ctx, layout, libs, req, sit, rows)
+		if !extrasEnabled {
+			for n := range arranged {
+				arranged[n].PreviewOnFocus = false
+				arranged[n].Layout.PreviewOnFocus = false
+			}
+		}
+		return arranged, err
 	}, Situation: func(ctx context.Context, req frontend.RowRequest) (core.HomeSituation, error) {
 		v, ok := ctx.Value(experienceSituationKey{}).(core.HomeSituation)
 		if !ok {
