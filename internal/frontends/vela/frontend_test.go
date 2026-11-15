@@ -9,6 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,22 +54,34 @@ func TestVelaProtocolInvariants(t *testing.T) {
 	t.Run("live pages", checkLivePages)
 	t.Run("fresh home visit", checkFreshHomeVisit)
 	t.Run("identity retry budget", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		fail(w, &frontend.IdentityRateLimitError{RetryAfter: 125*time.Second + time.Millisecond})
-		var response struct {
-			Error struct {
-				Class, Code string
-				Retry       struct {
-					Allowed                   bool
-					AfterSeconds, MaxAttempts int
+		for _, tc := range []struct {
+			err                error
+			status             int
+			delay, class, code string
+			attempts           int
+		}{
+			{&frontend.IdentityRateLimitError{RetryAfter: 125*time.Second + time.Millisecond}, 503, "126", "capacity", "rate_limited", 2},
+			{&frontend.ReceiptCapacityError{RetryAfter: time.Minute}, 429, "60", "capacity", "receipt_capacity", 3},
+			{frontend.ErrTrackSourceUnavailable, 502, "2", "source", "track_source_unavailable", 3},
+		} {
+			w := httptest.NewRecorder()
+			fail(w, tc.err)
+			var response struct {
+				Error struct {
+					Class, Code string
+					Retry       struct {
+						Allowed                   bool
+						AfterSeconds, MaxAttempts int
+					}
 				}
 			}
-		}
-		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-			t.Fatal(err)
-		}
-		if w.Code != 503 || w.Header().Get("Retry-After") != "126" || response.Error.Class != "capacity" || response.Error.Code != "rate_limited" || !response.Error.Retry.Allowed || response.Error.Retry.AfterSeconds != 126 || response.Error.Retry.MaxAttempts != 2 {
-			t.Fatal("identity retry policy lost", w.Code, response)
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			delay, _ := strconv.Atoi(tc.delay)
+			if w.Code != tc.status || w.Header().Get("Retry-After") != tc.delay || response.Error.Class != tc.class || response.Error.Code != tc.code || !response.Error.Retry.Allowed || response.Error.Retry.AfterSeconds != delay || response.Error.Retry.MaxAttempts != tc.attempts {
+				t.Fatal("identity retry policy lost", w.Code, response)
+			}
 		}
 	})
 	t.Run("search capability and mode", func(t *testing.T) {

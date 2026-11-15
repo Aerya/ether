@@ -106,6 +106,17 @@ func problem(w http.ResponseWriter, status int, class, code string) {
 }
 func fail(w http.ResponseWriter, err error, requests ...*http.Request) {
 	switch {
+	case errors.Is(err, frontend.ErrReceiptCapacity):
+		var capacity *frontend.ReceiptCapacityError
+		seconds := 1
+		if errors.As(err, &capacity) {
+			seconds = max(1, int((capacity.RetryAfter+time.Second-1)/time.Second))
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		send(w, 429, object{"error": object{"class": "capacity", "code": "receipt_capacity", "message": "receipt capacity", "retry": object{"allowed": true, "afterSeconds": seconds, "maxAttempts": 3}}})
+	case errors.Is(err, frontend.ErrTrackSourceUnavailable):
+		w.Header().Set("Retry-After", "2")
+		send(w, 502, object{"error": object{"class": "source", "code": "track_source_unavailable", "message": "track source unavailable", "retry": object{"allowed": true, "afterSeconds": 2, "maxAttempts": 3}}})
 	case errors.Is(err, frontend.ErrInteractionReceipt):
 		problem(w, 400, "request", "invalid_receipt")
 	case errors.Is(err, frontend.ErrRowViewStale), errors.Is(err, frontend.ErrLiveGuideStale):

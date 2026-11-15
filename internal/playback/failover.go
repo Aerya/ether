@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/braedonsaunders/ether/internal/core"
+	"github.com/braedonsaunders/ether/internal/frontend"
 	"github.com/braedonsaunders/ether/internal/releaseparse"
 	"github.com/braedonsaunders/ether/internal/releasepolicy"
 	"github.com/braedonsaunders/ether/internal/store"
@@ -147,6 +148,12 @@ func (m *Manager) openInitial(ctx context.Context, s *session, profile core.Qual
 					s.mu.Unlock()
 					return g, nil
 				}
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				if errors.Is(lastErr, frontend.ErrTrackSourceUnavailable) {
+					return nil, lastErr
+				}
 				if lastErr != nil && errors.Is(err, core.ErrNotAvailable) {
 					if errors.Is(lastErr, core.ErrDebridAuth) {
 						return nil, fmt.Errorf("%w (last failure: %v): %w", err, lastErr, core.ErrDebridAuth)
@@ -247,6 +254,9 @@ func (m *Manager) openInitial(ctx context.Context, s *session, profile core.Qual
 			attempt--
 		}
 		if s.exact {
+			if errors.Is(err, frontend.ErrTrackSourceUnavailable) {
+				return nil, err
+			}
 			if errors.Is(err, core.ErrNotFound) {
 				return nil, fmt.Errorf("%w: %w", core.ErrNotAvailable, core.ErrSourceChanged)
 			}
@@ -279,6 +289,8 @@ func (m *Manager) openInitial(ctx context.Context, s *session, profile core.Qual
 // like) cannot change how the failure is reported to the client.
 func releasesFailed(n int, lastErr error, allUncached bool) error {
 	switch {
+	case errors.Is(lastErr, frontend.ErrTrackSourceUnavailable):
+		return fmt.Errorf("%d releases failed: %w", n, lastErr)
 	case errors.Is(lastErr, core.ErrDebridAuth):
 		return fmt.Errorf("%w: %d releases failed (last: %v): %w", core.ErrNotAvailable, n, lastErr, core.ErrDebridAuth)
 	case allUncached && n > 0:
@@ -474,7 +486,8 @@ func (m *Manager) probeGeneration(ctx context.Context, s *session, res *core.Res
 	var perr error
 	var facts *probeCache
 	prober := "cache"
-	if len(cached) > 0 && cached[0] != nil && cached[0].releaseID == res.Release.ID && cached[0].info.Size == src.Size() &&
+	if len(cached) > 0 && cached[0] != nil && cached[0].releaseID == res.Release.ID && cached[0].info.Size == src.Size() && !cached[0].info.Estimated &&
+		(s.caps.Protocol != "vela" || (cached[0].info.Duration > 0 && cached[0].info.Video() != nil)) &&
 		(cached[0].nzbHash == "" || (len(res.NZB) > 0 && cached[0].nzbHash == nzbHash(res.NZB))) {
 		facts = cached[0]
 		copy := facts.info
@@ -514,6 +527,14 @@ func (m *Manager) probeGeneration(ctx context.Context, s *session, res *core.Res
 		mi.Duration = 0
 	default:
 		mi = core.CloneMediaInfo(*info)
+	}
+	// Vela publishes stable source track identities in its initial plan. A
+	// failed/incomplete probe cannot supply those identities. Let the bounded
+	// candidate loop try another release, without blacklisting this one.
+	if s.caps.Protocol == "vela" && (mi.Estimated || mi.Duration <= 0 || mi.Video() == nil || len(mi.Streams) == 0) {
+		m.log.Warn("source lacks verified playback facts", "release", res.Release.Name, "sourceSize", src.Size(), "releaseSize", res.Release.Size, "duration", mi.Duration, "estimated", mi.Estimated, "probeError", perr)
+		m.dropGeneration(g)
+		return nil, fmt.Errorf("probe %s: %w", res.Release.Name, frontend.ErrTrackSourceUnavailable)
 	}
 	// Reused persisted probes pass through here too, including a remembered
 	// playback_resume release played from zero with no requested offset.
