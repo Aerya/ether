@@ -211,5 +211,5 @@ Owner policy is persisted in `plugins.runtimeLimits` and
 manifest. `GET /api/plugins/runtime-limits` returns policy;
 `PUT /api/plugins/runtime-limits` takes `{plugin?: string, limits: {...}}`.
 Memory cannot exceed 4 GiB, job time has a one-year sanity bound, and member count
-has a 1,000,000-entry sanity bound. The ZIP directory has a 64 MiB allocation
+has a 1,000,000-entry sanity bound. ZIP, 7z (Copy/LZMA/LZMA2) and RAR 4/5 support bounded member reads. Solid reads restart at the block beginning per call; prefer large sequential chunks. Decoder memory and input/expansion bytes obey runtime grants. The ZIP directory has a 64 MiB allocation
 bound; traversal, encryption, special files and 1000:1 expansion checks remain.

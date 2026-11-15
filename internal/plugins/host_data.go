@@ -161,7 +161,7 @@ func openDataZIP(ctx context.Context, rc io.ReadSeeker, grants ...RuntimeLimits)
 	if len(grants) > 0 {
 		limits = grants[0]
 	}
-	directoryCap := min(int64(maxArchiveDirectory), int64(limits.ArchiveMembers)*65536)
+	directoryCap := min(int64(maxArchiveDirectory), int64(limits.ArchiveMembers)*65536, archiveMemory(limits)/8)
 
 	size, err := rc.Seek(0, io.SeekEnd)
 	if err != nil {
@@ -170,7 +170,7 @@ func openDataZIP(ctx context.Context, rc io.ReadSeeker, grants ...RuntimeLimits)
 	if size < 22 || size > limits.FetchBytes {
 		return nil, fmt.Errorf("plugins: ZIP size outside limit")
 	}
-	ra := seekReaderAt{ctx, rc}
+	ra := &archiveIOBudget{r: seekReaderAt{ctx, rc}, left: limits.FetchBytes}
 	tailSize := min(size, int64(65557))
 	tail := make([]byte, tailSize)
 	if _, err := ra.ReadAt(tail, size-tailSize); err != nil {
@@ -219,7 +219,7 @@ func openDataZIP(ctx context.Context, rc io.ReadSeeker, grants ...RuntimeLimits)
 			offset = binary.LittleEndian.Uint64(record[48:])
 			directoryEnd = int64(recordAt)
 		}
-		if count > uint64(limits.ArchiveMembers) || directory > uint64(directoryCap) || offset > uint64(directoryEnd) || directory > uint64(directoryEnd)-offset || offset+directory != uint64(directoryEnd) {
+		if count > uint64(limits.ArchiveMembers) || count > uint64(archiveMemory(limits)/1024) || directory > uint64(directoryCap) || offset > uint64(directoryEnd) || directory > uint64(directoryEnd)-offset || offset+directory != uint64(directoryEnd) {
 			return nil, fmt.Errorf("plugins: ZIP directory exceeds owner limits or has unsupported layout")
 		}
 		raw := make([]byte, int(directory))
@@ -374,30 +374,26 @@ func CallDataHost(ctx context.Context, h Host, name string, raw json.RawMessage)
 			opt.Offset = 0
 			value, err = readDataRange(ctx, rc, opt)
 		} else {
-			z, e := openDataZIP(ctx, rc, limits)
+			archive, e := openDataArchive(ctx, rc, limits)
 			if e != nil {
 				return nil, e
 			}
 			if name == "archive.list" {
-				members := make([]ArchiveMember, 0, len(z.File))
-				for i, f := range z.File {
-					members = append(members, ArchiveMember{i, f.Name, f.UncompressedSize64})
-				}
-				value = members
+				value = archive.members
 			} else {
-				if member < 0 || member >= len(z.File) {
-					return nil, fmt.Errorf("plugins: ZIP member index outside range")
+				if member < 0 || member >= len(archive.members) {
+					return nil, fmt.Errorf("plugins: archive member index outside range")
 				}
-				f := z.File[member]
-				if uint64(opt.Offset) > f.UncompressedSize64 {
-					return nil, fmt.Errorf("plugins: ZIP member offset outside range")
+				f := archive.members[member]
+				if uint64(opt.Offset) > f.Size {
+					return nil, fmt.Errorf("plugins: archive member offset outside range")
 				}
-				stream, e := f.Open()
+				stream, e := archive.open(member)
 				if e != nil {
 					return nil, e
 				}
 				defer stream.Close()
-				value, err = readDataRange(ctx, io.LimitReader(stream, int64(f.UncompressedSize64)+1), opt)
+				value, err = readDataRange(ctx, io.LimitReader(stream, int64(f.Size)), opt)
 			}
 		}
 	}

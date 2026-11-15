@@ -77,8 +77,9 @@ func (c *RemoteHostClient) CacheRead(ctx context.Context, blob string, r DataRan
 	return c.dataRead(ctx, "cache.read", []any{blob, r})
 }
 
-// ArchiveOpen reads a bounded range of an uncompressed ZIP member. Deflate
-// members are inflated from the start per call; use sequential large chunks.
+// ArchiveOpen reads a bounded uncompressed ZIP, 7z or RAR member range.
+// Compressed reads restart at the member or solid block beginning per call.
+// Prefer large sequential chunks; decoder work and memory obey host grants.
 func (c *RemoteHostClient) ArchiveOpen(ctx context.Context, blob string, member int, r DataRange) ([]byte, error) {
 	if err := checkDataRange(r); err != nil {
 		return nil, err

@@ -305,7 +305,7 @@ details. The next upsert without `unavailable` clears it, even with the same
 etag. This is independent of the level's `playable` capability; clearing the
 reason does not grant playback to a nonplayable level.
 
-### Large downloads and ZIP members (v0.3.11)
+### Large downloads and archive members (v0.3.12)
 
 Hosted and remote clients can keep large data in the host's existing library
 blob cache, without copying the complete file into guest memory:
@@ -336,7 +336,7 @@ synchronous and bounded by the current call's deadline; there is no background
 prefetch. Cache eviction still applies to returned refs.
 
 `cache.read(blob, {offset, length})` reads at most 1 MiB from a cached blob.
-`archive.list(blob)` returns `[{index, name, size}]`, reading the ZIP directory
+`archive.list(blob)` returns `[{index, name, size}]`, reading ZIP, 7z or RAR (4.x/5.x) headers
 without loading all compressed bytes. `archive.open(blob, memberIndex,
 {offset, length})` returns at most 1 MiB from the **uncompressed** member.
 Offsets are nonnegative integers; lengths are 1..1048576. A read at EOF returns
@@ -346,17 +346,34 @@ only the calling plugin's cache namespace and closes the reader afterward.
 The Go `RemoteHostClient` provides `FetchToCache`, `CacheRead`, `ArchiveList` and
 `ArchiveOpen` through the optional `BlobHost` interface, with `DataRange` options.
 
-ZIP sizes and member counts use owner global/per-plugin ceilings: defaults are
-8 GiB compressed archive/member, 32 GiB total expansion and 65,535 members.
-The central directory is bounded to 64 MiB (1024 bytes per member name), with a
-1000:1 maximum expansion ratio per member. ZIP64 is supported; split archives
-remain unsupported. Store and Deflate are supported. Unsafe paths, special files, encryption,
-Split archives are rejected. Nothing is extracted to a filesystem.
-Deflate ranges inflate and discard up to the requested offset on each call;
-prefer large sequential chunks, and avoid repeatedly rescanning a large member.
+Archive sizes and member counts use owner global/per-plugin ceilings: defaults
+are 8 GiB compressed archive/member, 32 GiB total expansion and 65,535 members.
+Member names are limited to 1024 bytes. ZIP supports Store/Deflate and ZIP64;
+7z supports Copy, LZMA and LZMA2 (including solid blocks); RAR supports stored
+and compressed 4.x/5.x members. Other 7z coder chains are refused, including
+BCJ filters and PPMd. Split/multi-volume input, encrypted headers or members,
+unsafe paths, links and other special files are refused. Directories may appear
+in listings but cannot be opened. A 1000:1 expansion ceiling applies per ZIP
+member and per 7z/RAR compression block. Nothing is extracted to a filesystem.
+
+Metadata and decoder allocations are bounded by `memoryBytes` (32 MiB by
+default). ZIP directories also retain the 64 MiB host ceiling. A large dictionary
+or directory can be refused even when the member fits the byte grant. 7z uses
+at most half the memory grant for its dictionary; RAR reserves one eighth per
+decoder buffer, including PPMd and filters. Compressed input bytes read, including
+metadata and decoder read-ahead, are cumulatively bounded by `fetchBytes` per
+call. Expanded solid blocks and the whole declared expansion are bounded by
+`archiveExpandedBytes`. Calls observe the runtime deadline and cancellation.
+
+A range is a bound on **returned bytes**, not decompression work. Deflate reads
+start at the member beginning. Solid 7z/RAR ranges decode dependencies from the
+block beginning, then discard bytes through the requested offset. Calls are
+stateless: sequential calls also restart decoding. RAR can additionally consume
+earlier solid blocks in archive order. Prefer large sequential
+chunks and avoid repeated random reads; persist verification digests in KV.
 Range reads do not independently verify the full member CRC; use trusted digests
 when integrity matters. Local owner-granted paths are not archive inputs: first
-use a plugin-owned cached blob. Gzip files are not ZIPs and are unsupported here.
+use a plugin-owned cached blob. Gzip files are unsupported here.
 An HTTP `Content-Encoding: gzip` response may be transparently decoded by the
 HTTP client; its digests then describe the decoded bytes. A `.gz` file is not
 automatically decompressed by this archive service.
