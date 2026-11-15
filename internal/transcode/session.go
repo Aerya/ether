@@ -45,6 +45,7 @@ type Session struct {
 	qsvRetried              bool
 	normalizeNegativeDTS    bool
 	encoder                 *encoderLifetime
+	mediaGeneration         string // immutable HLS resource namespace for this session instance
 	id                      string
 	m                       *Manager
 	dir                     string
@@ -411,7 +412,7 @@ func (s *Session) segName(n int) string {
 	if s.androidMatroskaHLS && container == ContainerMatroska {
 		container = ContainerMPEGTS
 	}
-	return s.m.opts.segmentURI(n, container)
+	return s.scopeMediaName(s.m.opts.segmentURI(n, container))
 }
 
 // runDirLocked is where the wanted track's ffmpeg run writes segments:

@@ -1717,6 +1717,9 @@ func (s *Server) handleTranscodeSession(w http.ResponseWriter, r *http.Request) 
 // segmentNumber extracts the segment index from names like "00012.ts",
 // "12.ts", "segment-12.m4s".
 func segmentNumber(name string) (int, bool) {
+	if strings.HasPrefix(name, "g-") {
+		return frontend.ParseSegmentName(name)
+	}
 	if name == frontend.InitSegmentName || name == frontend.MatroskaHeaderName {
 		return frontend.InitSegment, true
 	}

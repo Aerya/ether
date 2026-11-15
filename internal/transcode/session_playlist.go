@@ -57,6 +57,15 @@ func (s *Session) span() time.Duration {
 // of the player (spike governor) or SwapInput; governed sessions render
 // an EVENT playlist fresh each time so reloads see re-planned segments.
 func (s *Session) renderPlaylistLocked(t int) []byte {
+	body := s.renderMediaPlaylistLocked(t)
+	if hasInitSegment(s.container) {
+		name := initSegmentName(s.container)
+		body = bytes.ReplaceAll(body, []byte(`URI="`+name+`"`), []byte(`URI="`+s.scopeMediaName(name)+`"`))
+	}
+	return body
+}
+
+func (s *Session) renderMediaPlaylistLocked(t int) []byte {
 	independent := !s.requireIndependentProof || s.segmentsIndependent
 	if s.liveInput && s.total == 0 && !s.isDASH() {
 		return s.livePlaylistLocked(t, func(n int) bool { return s.discontBeforeLocked(t, n) })

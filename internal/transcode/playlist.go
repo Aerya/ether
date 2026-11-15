@@ -186,6 +186,13 @@ func ParseSegmentName(name string) (int, bool) {
 	if i := strings.LastIndexByte(name, '/'); i >= 0 {
 		name = name[i+1:]
 	}
+	if strings.HasPrefix(name, "g-") {
+		_, rest, ok := splitMediaGeneration(name)
+		if !ok {
+			return 0, false
+		}
+		name = rest
+	}
 	if name == InitSegmentName || name == MatroskaHeaderName {
 		return InitSegment, true
 	}

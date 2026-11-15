@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	urlpath "path"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -414,6 +415,9 @@ func (s *Session) serve(w http.ResponseWriter, r *http.Request, op string, n int
 	s.serveRepresentation(w, r, message{Op: op, Segment: n})
 }
 func (s *Session) serveRepresentation(w http.ResponseWriter, r *http.Request, m message) (facts RepresentationCompletion) {
+	if m.Op == "segment" || m.Op == "rung-segment" {
+		m.MediaName = urlpath.Base(r.URL.Path)
+	}
 	n := m.Segment
 	if n < -1 || n > 10000000 {
 		http.Error(w, "invalid segment", 400)
