@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/braedonsaunders/ether/internal/frontend"
 )
@@ -21,6 +22,9 @@ func (i *instance) refreshOutput(ctx context.Context, id string, s *playSession)
 		url, _ := path["url"].(string)
 		if path["transport"] != "hls" || url == "" {
 			continue
+		}
+		if clock, ok := hs.(interface{ TimelineOrigin() time.Duration }); ok {
+			path["timelineOriginSeconds"] = clock.TimelineOrigin().Seconds()
 		}
 		if ladder, ok := hs.(interface{ Rungs() []frontend.HLSRung }); ok {
 			qualities := []object{}

@@ -16,6 +16,7 @@ import (
 // runSpec is everything needed to build one ffmpeg HLS run.
 type runSpec struct {
 	HealTimestamps bool
+	CopyOrigin     bool // retain audio from the measured video presentation origin
 	// RampClock keeps every run of a fast-start session on the steady clock.
 	RampClock bool
 	// AuthoredTimeline preserves adaptive sessions with a separate clock.
@@ -386,7 +387,14 @@ func buildCodecArgs(s runSpec) []string {
 	}
 	if s.Start > 0 && !pceOutputSeek {
 		seek := secs(s.Start)
-		if s.HasSeekFrom {
+		if s.CopyOrigin && d.VideoCopy {
+			seek = secs(copyOriginSeek(s.Start))
+			if s.Info.Container == "mpegts" || s.Info.Container == "mpeg" {
+				// Unindexed timestamp seeks must land before the keyframe packet.
+				seek = secs(max(0, s.Start.Truncate(time.Millisecond)-time.Millisecond))
+			}
+			args = append(args, "-noaccurate_seek")
+		} else if s.HasSeekFrom {
 			seek = secs(s.SeekFrom)
 		} else if lead := hlsNVENCPreroll(s); lead > 0 {
 			// Keep the measured NVENC seek and its hardware-frame trim.
@@ -610,6 +618,9 @@ func buildCodecArgs(s runSpec) []string {
 			args = append(args, "-c:a", enc, "-ac", strconv.Itoa(ch), "-ar", strconv.Itoa(decisionAudioRate(d)),
 				"-b:a", fmt.Sprintf("%dk", kbps))
 			filters := append([]string(nil), d.AudioFilters...)
+			if s.CopyOrigin && d.VideoCopy {
+				filters = append(filters, "atrim=start="+strconv.FormatFloat(s.Start.Seconds(), 'f', 9, 64))
+			}
 			if start, ok := hlsAudioPreroll(s); ok {
 				rate := decisionAudioRate(d)
 				// Coarse demuxer clocks round packet PTS. Recover the decoded

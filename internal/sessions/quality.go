@@ -154,5 +154,8 @@ func (b *Broker) PrepareQuality(ctx context.Context, a frontend.SessionAccess, i
 	if err = preparer.PrepareRung(ctx, rung, position); err != nil {
 		return "", 0, err
 	}
+	if clock, ok := hs.(interface{ TimelineOrigin() time.Duration }); ok {
+		origin = clock.TimelineOrigin()
+	}
 	return url, origin, nil
 }
