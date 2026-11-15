@@ -5,10 +5,11 @@ import "context"
 // DescriptiveResult is an AI-generated collection search. Pending requests
 // have no invented results; clients that can poll retain their pending state.
 type DescriptiveResult struct {
-	Spec  *CollectionSpec
-	State string
-	Title string
-	Items []Title
+	Spec              *CollectionSpec
+	State             string
+	RetryAfterSeconds int
+	Title             string
+	Items             []Title
 }
 
 // DescriptiveSearcher reuses the collection builder and never waits for AI

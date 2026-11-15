@@ -2,7 +2,6 @@ package experience
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/braedonsaunders/ether/internal/core"
 	"github.com/braedonsaunders/ether/internal/frontend"
@@ -34,22 +33,20 @@ func (s *Service) DescriptiveSearch(ctx context.Context, v *core.Viewer, d core.
 func (s *Service) describeSearch(ctx context.Context, v *core.Viewer, _ core.Device, query string, q frontend.ItemQuery, wait bool) (frontend.SearchPage, error) {
 	source := s.descriptiveSource()
 	if source == nil || !source.DescriptiveSearchAvailable() {
-		return frontend.SearchPage{}, fmt.Errorf("AI search is unavailable")
+		return frontend.SearchPage{}, frontend.ErrNotAvailable
 	}
 	viewer, err := s.viewer(ctx, v)
 	if err != nil {
 		return frontend.SearchPage{}, err
 	}
 	result, err := source.DescribeSearch(core.WithCatalogViewer(ctx, viewer), viewer, query, wait)
-	if err != nil {
+	if result.State == "unavailable" {
+		return frontend.SearchPage{}, frontend.ErrNotAvailable
+	}
+	if err != nil && result.State != "failed" {
 		return frontend.SearchPage{}, err
 	}
-	if result.State == "busy" {
-		return frontend.SearchPage{}, fmt.Errorf("AI search is busy")
-	}
-	if result.State != "ready" {
-		return frontend.SearchPage{Continuation: frontend.ContinuationUnknown}, nil
-	}
+	status := &frontend.DescriptiveSearchStatus{State: frontend.DescriptiveSearchState(result.State), RetryAfterSeconds: result.RetryAfterSeconds}
 	var items []core.Title
 	for _, title := range result.Items {
 		if !s.visible(ctx, viewer, &title) {
@@ -71,5 +68,9 @@ func (s *Service) describeSearch(ctx context.Context, v *core.Viewer, _ core.Dev
 	limit = min(limit, 200)
 	total := len(items)
 	offset = min(offset, total)
-	return frontend.SearchPage{Page: core.Page{Items: items[offset:min(offset+limit, total)], Total: total}}, nil
+	continuation := frontend.ContinuationExhausted
+	if result.State != "ready" || offset+limit < total {
+		continuation = frontend.ContinuationUnknown
+	}
+	return frontend.SearchPage{Page: core.Page{Items: items[offset:min(offset+limit, total)], Total: total}, Descriptive: status, Continuation: continuation}, nil
 }

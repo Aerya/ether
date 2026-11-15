@@ -84,7 +84,7 @@ func (i *instance) titles(r *http.Request, v *frontend.Viewer, token string, ts 
 				return nil, e
 			}
 			for _, item := range images {
-				for _, g := range item.Images {
+				for _, g := range titleArtwork(item.Item, item.Images) {
 					im := g.Image
 					art[item.Item] = append(art[item.Item], object{"id": hash(im.Path), "kind": im.Kind, "tag": im.Tag, "sizes": []object{imageSize(im, g.Secret)}, "blurHash": im.BlurHash, "thumbHash": im.ThumbHash})
 				}
@@ -102,6 +102,24 @@ func (i *instance) titles(r *http.Request, v *frontend.Viewer, token string, ts 
 	}
 	return out, nil
 }
+
+// Episode cards have one landscape image: their own still, or an explicitly
+// typed fallback. Do not leave inherited series art competing with a still.
+// Selection happens after batch signing, so every URL retains its item scope.
+func titleArtwork(key frontend.RatingKey, images []frontend.GrantedImage) []frontend.GrantedImage {
+	if key.Kind() != frontend.KindEpisode {
+		return images
+	}
+	for _, kind := range []string{frontend.ImageStill, frontend.ImageBackdrop, frontend.ImagePoster} {
+		for _, image := range images {
+			if image.Image.Kind == kind && image.Image.Path != "" && image.Secret != "" {
+				return []frontend.GrantedImage{image}
+			}
+		}
+	}
+	return nil
+}
+
 func (i *instance) home(r *http.Request, v *frontend.Viewer, token string, sources ...map[string]heroSource) ([]object, bool, error) {
 	rows, more, err := i.homeVisit(r, v, token, false, sources...)
 	if errors.Is(err, frontend.ErrRowViewStale) && r.PathValue("id") == "" && r.URL.Query().Get("cursor") == "" {
@@ -499,8 +517,8 @@ func (i *instance) search(w http.ResponseWriter, r *http.Request) {
 	switch b.Mode {
 	case "descriptive":
 		source, ok := i.host.Experience.(frontend.DescriptiveSearcher)
-		if !ok || !source.DescriptiveSearchAvailable() {
-			i.unavailable(w, r)
+		if !ok || !source.DescriptiveSearchAvailable() || !i.aiSearchAvailable() {
+			problem(w, http.StatusServiceUnavailable, "policy", "feature_unavailable")
 			return
 		}
 		p, e = source.DescriptiveSearch(r.Context(), v, requestDevice(r), b.Query, frontend.ItemQuery{Limit: n, NoTotal: true})
@@ -519,7 +537,11 @@ func (i *instance) search(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	send(w, 200, object{"query": b.Query, "generation": b.Generation, "items": ts, "continuation": p.Continuation})
+	out := object{"query": b.Query, "generation": b.Generation, "items": ts, "continuation": p.Continuation}
+	if b.Mode == "descriptive" {
+		out["descriptive"] = descriptiveWire(p.Descriptive)
+	}
+	send(w, 200, out)
 }
 func (i *instance) interactions(w http.ResponseWriter, r *http.Request) {
 	v, _, e := i.viewer(r)
@@ -601,4 +623,24 @@ func (i *instance) watch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	send(w, 200, object{"accepted": true})
+}
+
+// Older experience implementations omit the status after a successful read.
+func descriptiveWire(status *frontend.DescriptiveSearchStatus) object {
+	state := frontend.DescriptiveReady
+	if status != nil {
+		state = status.State
+	}
+	retry := object{"allowed": false}
+	if state == frontend.DescriptivePending || state == frontend.DescriptiveBusy || state == frontend.DescriptiveFailed {
+		seconds := 2
+		if state == frontend.DescriptiveFailed {
+			seconds = 60
+		}
+		if status != nil && status.RetryAfterSeconds > 0 {
+			seconds = status.RetryAfterSeconds
+		}
+		retry = object{"allowed": true, "afterSeconds": seconds}
+	}
+	return object{"state": state, "retry": retry}
 }

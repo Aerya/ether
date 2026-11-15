@@ -1,6 +1,7 @@
 package collections_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,15 +20,24 @@ import (
 )
 
 type describeChat struct {
-	calls atomic.Int32
-	block chan struct{}
-	fail  atomic.Bool
-	genre string
+	calls    atomic.Int32
+	block    chan struct{}
+	fail     atomic.Bool
+	genre    string
+	deadline chan time.Duration
 }
 
 func (c *describeChat) Enabled() bool { return true }
 func (c *describeChat) Chat(ctx context.Context, _ []llm.Message, _ bool) (string, error) {
 	c.calls.Add(1)
+	if c.deadline != nil {
+		deadline, ok := ctx.Deadline()
+		if ok {
+			c.deadline <- time.Until(deadline)
+		} else {
+			c.deadline <- 0
+		}
+	}
 	if c.block != nil {
 		select {
 		case <-ctx.Done():
@@ -71,7 +81,8 @@ func TestDescriptiveSearch(t *testing.T) {
 		}
 	}
 	counted := &describeCatalog{Catalog: cat}
-	svc, err := collections.New(db, counted, slog.Default())
+	var warnings bytes.Buffer
+	svc, err := collections.New(db, counted, slog.New(slog.NewJSONHandler(&warnings, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,16 +125,53 @@ func TestDescriptiveSearch(t *testing.T) {
 			t.Logf("%s -> %s", tc.q, ready.Items[0].Title)
 		})
 	}
+	// Admission and request cancellation must not shorten the shared job's
+	// model deadline or create a queue of blocked goroutines.
+	blocked := &describeChat{genre: "Comedy", block: make(chan struct{}), deadline: make(chan time.Duration, 2)}
+	svc.SetLLM(blocked)
+	for _, query := range []string{"bounded job one", "bounded job two"} {
+		request, cancelRequest := context.WithCancel(ctx)
+		pending, e := svc.DescribeSearch(request, nil, query, false)
+		cancelRequest()
+		if e != nil || pending.State != "pending" || pending.RetryAfterSeconds <= 0 {
+			t.Fatalf("admission: %+v %v", pending, e)
+		}
+		select {
+		case remaining := <-blocked.deadline:
+			if remaining < 115*time.Second || remaining > 2*time.Minute {
+				t.Fatalf("shared draft deadline: %v", remaining)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	busy, e := svc.DescribeSearch(ctx, nil, "bounded job three", false)
+	if e != nil || busy.State != "busy" || busy.RetryAfterSeconds <= 0 || blocked.calls.Load() != 2 {
+		t.Fatalf("bounded jobs: %+v %v", busy, e)
+	}
+	close(blocked.block)
+	for _, query := range []string{"bounded job one", "bounded job two"} {
+		ready, e := svc.DescribeSearch(ctx, nil, query, true)
+		if e != nil || ready.State != "ready" {
+			t.Fatalf("shared job completion: %+v %v", ready, e)
+		}
+	}
+
 	failed := &describeChat{genre: "Comedy"}
 	failed.fail.Store(true)
 	svc.SetLLM(failed)
 	for i := 0; i < 2; i++ {
 		result, e := svc.DescribeSearch(ctx, nil, "unavailable model query", true)
-		if e == nil || result.State != "failed" {
+		if e == nil || result.State != "failed" || result.RetryAfterSeconds < 1 || result.RetryAfterSeconds > 60 {
 			t.Fatalf("failure: %+v %v", result, e)
 		}
 	}
 	if failed.calls.Load() != 1 {
 		t.Fatal("failed model was retried without backoff")
 	}
+	log := warnings.String()
+	if strings.Count(log, `"msg":"descriptive search failed"`) != 1 || strings.Contains(log, "unavailable model query") || strings.Contains(log, "offline") || !strings.Contains(log, `"query_hash":`) || !strings.Contains(log, `"stage":"draft"`) || !strings.Contains(log, `"error_class":`) || !strings.Contains(log, `"duration":`) {
+		t.Fatalf("failure logging must be once, classified and sanitized: %s", log)
+	}
+
 }

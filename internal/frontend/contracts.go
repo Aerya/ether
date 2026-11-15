@@ -252,6 +252,7 @@ const (
 )
 
 type SearchPage struct {
+	Descriptive  *DescriptiveSearchStatus
 	Page         core.Page
 	TotalExact   bool
 	Continuation Continuation

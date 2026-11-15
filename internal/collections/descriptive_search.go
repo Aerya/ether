@@ -2,9 +2,12 @@ package collections
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
+	"net"
 	"slices"
 	"strings"
 	"time"
@@ -14,6 +17,10 @@ import (
 )
 
 const describeCacheMax = 256
+
+// The draft, name resolution and bounded candidates share one deadline. A
+// detached search request cannot inherit the caller's short response budget.
+const describeJobTimeout = 2 * time.Minute
 
 type describeDraft struct {
 	done chan struct{}
@@ -69,7 +76,7 @@ func (s *Service) DescribeSearch(ctx context.Context, user *core.User, query str
 	if job == nil {
 		if s.describeActive >= 2 {
 			s.describeMu.Unlock()
-			return core.DescriptiveResult{State: "busy"}, nil
+			return core.DescriptiveResult{State: "busy", RetryAfterSeconds: 2}, nil
 		}
 		if s.describeJobs == nil {
 			s.describeJobs = map[string]*describeJob{}
@@ -101,7 +108,7 @@ func (s *Service) DescribeSearch(ctx context.Context, user *core.User, query str
 		select {
 		case <-job.done:
 		default:
-			return core.DescriptiveResult{State: "pending"}, nil
+			return core.DescriptiveResult{State: "pending", RetryAfterSeconds: 2}, nil
 		}
 	}
 	select {
@@ -109,6 +116,9 @@ func (s *Service) DescribeSearch(ctx context.Context, user *core.User, query str
 		return core.DescriptiveResult{}, ctx.Err()
 	case <-job.done:
 		result := job.result
+		if result.State == "failed" {
+			result.RetryAfterSeconds = max(1, int(math.Ceil((time.Minute - s.now().Sub(job.at)).Seconds())))
+		}
 		result.Items = slices.Clone(result.Items)
 		result.Items = slices.DeleteFunc(result.Items, func(t core.Title) bool {
 			return t.Adult || (user != nil && contentrating.Exceeds(t.ContentRating, user.MaxContentRating))
@@ -176,11 +186,14 @@ func (s *Service) describeSpec(ctx context.Context, key, query string) (*core.Co
 }
 
 func (s *Service) runDescribe(parent context.Context, user *core.User, key, query string, job *describeJob) {
-	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(parent, describeJobTimeout)
 	defer cancel()
+	started := time.Now()
+	stage := "draft"
 	spec, err := s.describeSpec(ctx, key, query)
 	result := core.DescriptiveResult{State: "failed"}
 	if err == nil {
+		stage = "candidates"
 		result.Items, err = s.cat.(core.DescriptiveCatalog).DescribeCandidates(core.WithCatalogViewer(core.WithExplicitSearch(ctx), user), *spec, 200)
 		if err == nil {
 			result.State, result.Title = "ready", spec.Name
@@ -208,8 +221,28 @@ func (s *Service) runDescribe(parent context.Context, user *core.User, key, quer
 			}
 		}
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
 		result.State = "failed"
+		class := "upstream"
+		var netErr net.Error
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			class = "timeout"
+		case errors.Is(err, context.Canceled):
+			class = "cancelled"
+		case errors.As(err, &netErr) && netErr.Timeout():
+			class = "timeout"
+		case stage == "candidates":
+			class = "catalog"
+		}
+		log := s.log
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Warn("descriptive search failed", "query_hash", fmt.Sprintf("%x", sha256.Sum256([]byte(key))), "stage", stage, "error_class", class, "duration", time.Since(started))
 	}
 	s.describeMu.Lock()
 	job.result, job.err, job.at = result, err, s.now()

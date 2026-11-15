@@ -30,15 +30,21 @@ type descriptiveFake struct {
 	frontendtest.Experience
 	available bool
 	calls     int
+	state     frontend.DescriptiveSearchState
 }
 
+func (f *descriptiveFake) AISearchAvailable() bool { return f.available }
+func (f *descriptiveFake) AISearch(context.Context, *frontend.Viewer, frontend.Device, string, frontend.ItemQuery) (frontend.SearchPage, error) {
+	return frontend.SearchPage{}, nil
+}
 func (f *descriptiveFake) DescriptiveSearchAvailable() bool { return f.available }
 func (f *descriptiveFake) DescriptiveSearch(context.Context, *frontend.Viewer, frontend.Device, string, frontend.ItemQuery) (frontend.SearchPage, error) {
 	f.calls++
-	return frontend.SearchPage{Continuation: frontend.ContinuationUnknown}, nil
+	return frontend.SearchPage{Continuation: frontend.ContinuationUnknown, Descriptive: &frontend.DescriptiveSearchStatus{State: f.state}}, nil
 }
 
 func TestVelaProtocolInvariants(t *testing.T) {
+	t.Run("AI search jobs", checkAISearch)
 	t.Run("pairing lineage", checkPairingLineage)
 	t.Run("live pages", checkLivePages)
 	t.Run("fresh home visit", checkFreshHomeVisit)
@@ -62,7 +68,7 @@ func TestVelaProtocolInvariants(t *testing.T) {
 		}
 	})
 	t.Run("search capability and mode", func(t *testing.T) {
-		source := &descriptiveFake{available: true}
+		source := &descriptiveFake{available: true, state: frontend.DescriptiveReady}
 		fastCalls := 0
 		source.SearchFunc = func(context.Context, *frontend.Viewer, frontend.Device, string, frontend.ItemQuery) (frontend.SearchPage, error) {
 			fastCalls++
@@ -84,6 +90,33 @@ func TestVelaProtocolInvariants(t *testing.T) {
 		if source.calls != 1 || fastCalls != 1 {
 			t.Fatal("search modes shared the wrong source")
 		}
+		for _, state := range []frontend.DescriptiveSearchState{frontend.DescriptiveReady, frontend.DescriptivePending, frontend.DescriptiveBusy, frontend.DescriptiveFailed} {
+			source.state = state
+			r := httptest.NewRequest(http.MethodPost, "/vela/v0/search", nil)
+			r = r.WithContext(context.WithValue(r.Context(), bodyKey{}, json.RawMessage(`{"query":"cozy cute girls night in","mode":"descriptive"}`)))
+			r.Header.Set("Authorization", "Bearer token")
+			r.Header.Set("X-Vela-Device-Id", "device")
+			w := httptest.NewRecorder()
+			i.search(w, r)
+			var result struct {
+				Items       []any
+				Descriptive struct {
+					State string
+					Retry struct {
+						Allowed      bool
+						AfterSeconds int
+					}
+				}
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			retry := state != frontend.DescriptiveReady
+			if w.Code != 200 || result.Descriptive.State != string(state) || result.Descriptive.Retry.Allowed != retry || (retry && result.Descriptive.Retry.AfterSeconds < 1) || len(result.Items) != 0 {
+				t.Fatalf("job state %s: %d %s", state, w.Code, w.Body.String())
+			}
+		}
+
 		for _, available := range []bool{true, false} {
 			source.available = available
 			if got := i.capabilities()["features"].(object)["descriptiveSearch"].(object)["available"]; got != available {
@@ -103,7 +136,7 @@ func TestVelaProtocolInvariants(t *testing.T) {
 			t.Fatal("broker URL falls through to another frontend")
 		}
 		calls := 0
-		i := &instance{host: frontend.Host{Sessions: frontendtest.Sessions{ServeMediaFunc: func(w http.ResponseWriter, r *http.Request) {
+		i := &instance{sessions: map[string]*playSession{"session": {scope: "fake-family", device: "device"}}, host: frontend.Host{Identity: identityFake{}, Sessions: frontendtest.Sessions{ServeMediaFunc: func(w http.ResponseWriter, r *http.Request) {
 			calls++
 			if r.URL.Path != mediaPath {
 				t.Fatal("media path changed before grant authentication")

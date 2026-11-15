@@ -773,8 +773,11 @@ type StreamInfo struct {
 	ProbedLevel        *int     `json:"probedLevel,omitempty"`
 	FieldOrder         string   `json:"fieldOrder,omitempty"`
 	ProbedInterlaced   *bool    `json:"probedInterlaced,omitempty"`
-	BitDepth           int      `json:"bitDepth,omitempty"`
-	ColorTransfer      string   `json:"colorTransfer,omitempty"` // smpte2084 = HDR10, arib-std-b67 = HLG
+	// Rotation is ffprobe display-matrix rotation in degrees (counterclockwise).
+	// Nil means no rotation evidence, distinct from an explicit zero.
+	Rotation      *float64 `json:"rotation,omitempty"`
+	BitDepth      int      `json:"bitDepth,omitempty"`
+	ColorTransfer string   `json:"colorTransfer,omitempty"` // smpte2084 = HDR10, arib-std-b67 = HLG
 	// HEVCParameterSets reports a complete VPS/SPS/PPS hvcC record, safe for mp4toannexb.
 	HEVCParameterSets bool `json:"hevcParameterSets,omitempty"`
 	// Signalled picture format, in ffprobe's names; empty when the stream
@@ -834,9 +837,9 @@ type Chapter struct {
 
 // ProbeFactsVersion is the generation of facts a probe is expected to carry,
 // including reference frames, descriptive audio handler titles, HEVC decoder-
-// configuration parameter-set completeness, and AAC channel configurations.
+// configuration completeness, AAC channels, scan and rotation facts.
 // Persisted probes from an older generation are cache misses.
-const ProbeFactsVersion = 8
+const ProbeFactsVersion = 9
 
 type MediaInfo struct {
 	Has64bitOffsets       *bool         `json:"has64bitOffsets,omitempty"`
