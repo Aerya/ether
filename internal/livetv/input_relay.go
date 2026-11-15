@@ -88,6 +88,7 @@ type inputGrant struct {
 	// original source entry, not the resolved URL); immutable.
 	histChannel string
 	histSrc     StreamSource
+	admitting   atomic.Bool // cold admission tries another input after one refusal
 	reported    atomic.Bool // the grant's session has been counted in history
 	service     *Service
 
@@ -684,7 +685,9 @@ func (s *Service) relayFetchAs(ctx context.Context, cancel context.CancelFunc, g
 	// A provider that sells connections counts every attempt; it gets one,
 	// not a burst of retries.
 	attempts := 3
-	if segment {
+	if g.admitting.Load() && !segment {
+		attempts = 1
+	} else if segment {
 		attempts = 2
 	} else if g.source != "" && s.sourceConnectionLimit(g.source) > 0 {
 		attempts = 1

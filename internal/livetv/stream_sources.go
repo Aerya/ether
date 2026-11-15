@@ -188,7 +188,8 @@ func (s *Service) sourceStatus(channelID string, src StreamSource) StreamSourceS
 // orderedSourceCandidates lists a channel's enabled inputs, best first. Health
 // only orders them: a cooling-down source still appears, after every source
 // that is not, so recovery never waits out a cooldown while any input remains.
-// Within each health class owner priority decides; cooling sources come back
+// Recently played healthy inputs precede unchecked ones, then failed inputs.
+// Owner priority breaks ties; cooling sources come back
 // soonest-retry first. exclude skips source IDs (typically the one that just
 // failed). Invalid channel sources yield nil.
 func (s *Service) orderedSourceCandidates(c Channel, exclude ...string) []StreamSource {
@@ -196,9 +197,10 @@ func (s *Service) orderedSourceCandidates(c Channel, exclude ...string) []Stream
 		return nil
 	}
 	type ranked struct {
-		src   StreamSource
-		class int
-		retry time.Time
+		src    StreamSource
+		class  int
+		retry  time.Time
+		played time.Time
 	}
 	var out []ranked
 	for _, src := range c.StreamSources {
@@ -206,20 +208,25 @@ func (s *Service) orderedSourceCandidates(c Channel, exclude ...string) []Stream
 			continue
 		}
 		st := s.sourceStatus(c.ID, src)
-		class := 0
+		class := 1
 		switch st.State {
+		case "available":
+			class = 0
 		case "retry_ready":
-			class = 1
-		case "cooling_down":
 			class = 2
+		case "cooling_down":
+			class = 3
 		}
-		out = append(out, ranked{src: src, class: class, retry: st.RetryAfter})
+		out = append(out, ranked{src: src, class: class, retry: st.RetryAfter, played: st.LastPlayed})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].class != out[j].class {
 			return out[i].class < out[j].class
 		}
-		return out[i].class == 2 && out[i].retry.Before(out[j].retry)
+		if out[i].class == 0 {
+			return out[i].played.After(out[j].played)
+		}
+		return out[i].class == 3 && out[i].retry.Before(out[j].retry)
 	})
 	list := make([]StreamSource, len(out))
 	for i, r := range out {

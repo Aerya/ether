@@ -1175,6 +1175,14 @@ func (i *instance) ancestors(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", 401)
 		return
 	}
+	if _, err := ids.ParseGUID(ids.Channel, r.PathValue("id")); err == nil && i.liveTVEnabled() {
+		if _, err := i.host.LiveTV.ResolveChannelGUID(r.Context(), v, r.PathValue("id")); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		jsonReply(w, []any{})
+		return
+	}
 	if i.host.Experience == nil {
 		http.Error(w, "Unavailable", 503)
 		return

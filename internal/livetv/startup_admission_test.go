@@ -3,10 +3,13 @@ package livetv
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,8 +32,11 @@ func TestLiveStartupAdmission(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			var attempted []string
+			var attemptMu sync.Mutex
 			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				attemptMu.Lock()
 				attempted = append(attempted, r.URL.Path)
+				attemptMu.Unlock()
 				if backupWorks && r.URL.Path == "/backup" {
 					w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 					w.Write([]byte("#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nseg.ts\n"))
@@ -54,15 +60,15 @@ func TestLiveStartupAdmission(t *testing.T) {
 				_, err = s.Tune(t.Context(), &core.User{ID: 1}, c.ID, core.ClientCaps{})
 			}
 			t.Logf("admission elapsed=%s", time.Since(started))
-			// The relay retains its bounded same-input retries before failover.
-			var order []string
+			// Concurrent admission preserves membership, not request order.
+			attemptMu.Lock()
+			seen := map[string]bool{}
 			for _, path := range attempted {
-				if len(order) == 0 || path != order[len(order)-1] {
-					order = append(order, path)
-				}
+				seen[path] = true
 			}
-			if len(order) != 2 || order[0] != "/primary" || order[1] != "/backup" {
-				t.Fatalf("input order: %v", attempted)
+			attemptMu.Unlock()
+			if !seen["/backup"] || !backupWorks && !seen["/primary"] {
+				t.Fatalf("inputs attempted: %v", seen)
 			}
 			if backupWorks {
 				if err != nil || code != "" || admitted == nil || admitted.link.src.ID != "backup" {
@@ -87,4 +93,78 @@ func TestLiveStartupAdmission(t *testing.T) {
 			s.mu.Unlock()
 		})
 	}
+}
+
+// Many bad candidates must not shrink a healthy late input's first-picture
+// window. Capped accounts stay serial; uncapped ones stay within three probes.
+func TestLiveStartupAdmissionManyInputs(t *testing.T) {
+	for _, cap := range []int{0, 1} {
+		t.Run(fmt.Sprintf("provider_cap_%d", cap), func(t *testing.T) {
+			var active, peak atomic.Int32
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n := active.Add(1)
+				defer active.Add(-1)
+				for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
+				}
+				if r.URL.Path != "/healthy" {
+					w.WriteHeader(502)
+					return
+				}
+				w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+				_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nseg.ts\n"))
+			}))
+			defer up.Close()
+			tc := delayedAdmissionTranscoder{}
+			s := testService(t, Options{Transcoder: tc, HTTPClient: up.Client()})
+			if _, err := s.ImportSource(t.Context(), Source{ID: "account", Name: "Account", Playlist: "#EXTM3U\n#EXTINF:-1,Healthy\n" + up.URL + "/healthy\n"}); err != nil {
+				t.Fatal(err)
+			}
+			entry, err := s.sourceEntry(t.Context(), "account")
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry.limit = cap
+			s.setSourceEntry("account", entry)
+			c := Channel{ID: "many", Name: "Many", Number: "1", Kind: "iptv", Enabled: true, SourceID: "account"}
+			for n := 0; n < 15; n++ {
+				c.StreamSources = append(c.StreamSources, StreamSource{ID: fmt.Sprint(n), AuthSourceID: "account", URL: fmt.Sprintf("%s/bad/%d", up.URL, n), Enabled: true, Priority: n})
+			}
+			c.StreamSources = append(c.StreamSources, StreamSource{ID: "healthy", AuthSourceID: "account", URL: up.URL + "/healthy", Enabled: true, Priority: 15})
+			started := time.Now()
+			admitted, code, _, err := s.admitSteady(t.Context(), c)
+			elapsed := time.Since(started)
+			t.Logf("late healthy first picture: %s", elapsed)
+			if err != nil || code != "" || admitted == nil {
+				t.Fatalf("admission: %s %v", code, err)
+			}
+			if admitted.link.src.ID != "healthy" || admitted.link.primedDecoder == nil {
+				t.Fatal("healthy decoder/frame was not retained")
+			}
+			admitted.link.close(s)
+			if elapsed > 7*time.Second {
+				t.Fatalf("admission exceeded budget: %s", elapsed)
+			}
+			if peak.Load() > 3 || cap == 1 && peak.Load() > 1 {
+				t.Fatalf("provider cap exceeded: %d", peak.Load())
+			}
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			for _, reservations := range s.broadcastProviders {
+				if len(reservations) > 0 {
+					t.Fatal("reservation leaked")
+				}
+			}
+		})
+	}
+}
+
+type delayedAdmissionTranscoder struct{ admissionTranscoder }
+
+func (delayedAdmissionTranscoder) ProbeLive(ctx context.Context, input string) (*core.MediaInfo, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(650 * time.Millisecond):
+	}
+	return (admissionTranscoder{}).ProbeLive(ctx, input)
 }

@@ -45,12 +45,13 @@ type providerBroadcastPlanner struct {
 // steadyLink is one granted provider input: the relay grant (and with it the
 // shared tap) plus the provider-account connection it holds.
 type steadyLink struct {
-	src     StreamSource
-	ss      *session
-	release func()
-	format  string // probed container: "hls", "mpegts" or empty
-	uses    int
-	once    sync.Once
+	src           StreamSource
+	ss            *session
+	release       func()
+	format        string // probed container: "hls", "mpegts" or empty
+	uses          int
+	primedDecoder transcode.Decoder // admission already obtained its first picture
+	once          sync.Once
 }
 
 func (l *steadyLink) close(s *Service) {
@@ -58,6 +59,10 @@ func (l *steadyLink) close(s *Service) {
 		return
 	}
 	l.once.Do(func() {
+		if l.primedDecoder != nil {
+			_ = l.primedDecoder.Close()
+			l.primedDecoder = nil
+		}
 		s.revokeInput(l.ss)
 		l.ss.cancel()
 		if l.release != nil {
@@ -388,6 +393,11 @@ func (p *providerBroadcastPlanner) firstFrameDeadline(id string, backup bool) ti
 }
 
 func (p *providerBroadcastPlanner) startDecoder(ctx context.Context, link *steadyLink, liveEdge bool) (transcode.Decoder, error) {
+	if link.primedDecoder != nil {
+		d := link.primedDecoder
+		link.primedDecoder = nil
+		return d, nil
+	}
 	input, err := p.s.relayInput(link.ss)
 	if liveEdge {
 		input, err = p.s.relayInputLive(link.ss)

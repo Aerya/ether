@@ -288,57 +288,12 @@ func (s *Service) admitSteady(ctx context.Context, c Channel) (*steadyAdmission,
 	if ok, load, budget := s.steadyCapacity(smallest); !ok && !rockSolid {
 		return nil, steadyRefusedCapacity, "encode capacity in use (" + formatCores(load) + " of " + formatCores(budget) + " cores)", nil
 	}
-	// Divide a bounded input budget among candidates, leaving time for the
-	// first real picture. A cold tune never succeeds on a reconnecting screen.
-	probeCtx, stopProbes := context.WithTimeout(ctx, 6*time.Second)
+	probeCtx, stopProbes := context.WithTimeout(ctx, 7*time.Second)
 	defer stopProbes()
-	var probed *steadyAdmission
-	var failures []TuneInputFailure
-	var last error = core.ErrNotAvailable
-	silent := false
 	candidates := s.orderedSourceCandidates(c)
-	for i, src := range candidates {
-		if probeCtx.Err() != nil {
-			break
-		}
-		deadline, _ := probeCtx.Deadline()
-		attempt, cancel := context.WithTimeout(probeCtx, time.Until(deadline)/time.Duration(len(candidates)-i))
-		link, err := s.linkSteadySource(attempt, c, src, "broadcast-"+c.ID, s.latencyPolicy().TargetLatency()+s.latencyPolicy().SegmentDuration())
-		if err != nil {
-			cancel()
-			last = err
-			failures = append(failures, inputFailure(src.ID, err))
-			if !errors.Is(err, ErrProviderBusy) && !errors.Is(err, ErrProviderPaced) {
-				s.recordSourceHealth(c.ID, src, err, false)
-			}
-			continue
-		}
-		info, err := s.probeSteadyLink(attempt, c, link)
-		cancel()
-		if err == nil && info != nil && info.Video() == nil && len(info.Streams) > 0 {
-			// Radio: Steady renders pictures; an audio-only source plays direct.
-			link.close(s)
-			return nil, steadyRefusedAudioOnly, "audio-only source plays direct", nil
-		}
-		if err != nil || info == nil || info.Video() == nil {
-			if err == nil {
-				err = core.ErrNotAvailable
-			}
-			last = err
-			failures = append(failures, inputFailure(src.ID, err))
-			s.recordSourceHealth(c.ID, src, err, false)
-			link.close(s)
-			continue
-		}
-		if !liveInputHasAudio(info) {
-			silent = true
-			s.logger().Info("live silent source deferred", "channel", c.ID, "input", src.ID, "reason", "trying other candidates before silent fallback")
-			link.close(s)
-			continue
-		}
-		link.format = steadyInputFormat(info)
-		probed = &steadyAdmission{shape: steadyShapeFor(info), link: link, info: info}
-		break
+	probed, failures, silent, radio, last := s.raceSteadyInputs(probeCtx, c, candidates)
+	if radio && probed == nil {
+		return nil, steadyRefusedAudioOnly, "audio-only source plays direct", nil
 	}
 	if probed == nil && silent {
 		return nil, steadyRefusedVideoOnly, "all playable candidates lack audio; trying direct fallback", nil
@@ -393,6 +348,7 @@ func (s *Service) probeSteadyLink(ctx context.Context, c Channel, link *steadyLi
 		return nil, err
 	}
 	defer s.revokeInput(probe)
+	s.setInputAdmission(probe, true)
 	// Read through the shared tap first: ffprobe sees only the loopback HTTP
 	// status and would otherwise hide the provider’s actual refusal.
 	if _, _, err := s.sniffInput(ctx, probe, 1); err != nil {

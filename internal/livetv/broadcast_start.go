@@ -535,6 +535,7 @@ func (s *Service) launchBroadcast(ctx context.Context, ss *session, l broadcastL
 			provider := &providerBroadcastPlanner{s: s, channel: c, format: format, runner: runner, ladder: newSteadyLadder()}
 			if admitted != nil && admitted.link != nil {
 				provider.primed = admitted.link
+				provider.ladder.next = admitted.link.src.ID
 				consumed = true
 			}
 			planner = provider

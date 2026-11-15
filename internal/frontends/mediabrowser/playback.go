@@ -745,6 +745,81 @@ func (i *instance) liveStreamsOpen(w http.ResponseWriter, r *http.Request) {
 	jsonReply(w, map[string]any{"MediaSource": source})
 }
 
+// liveStreamsMediaInfo returns the source of an already open, authorized live
+// stream. Looking up metadata never opens another provider connection.
+func (i *instance) liveStreamsMediaInfo(w http.ResponseWriter, r *http.Request) {
+	v, _, err := i.viewer(r)
+	if err != nil || v == nil {
+		http.Error(w, "Unauthorized", 401)
+		return
+	}
+	if i.host.Sessions == nil {
+		http.Error(w, "Unavailable", 503)
+		return
+	}
+	var body struct {
+		LiveStreamId string `json:"LiveStreamId"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decode(r, &body); err != nil && !errors.Is(err, io.EOF) {
+			http.Error(w, "Bad Request", 400)
+			return
+		}
+	}
+	streamID := body.LiveStreamId
+	if values := route.Query(r.URL.Query(), "LiveStreamId"); len(values) > 1 {
+		http.Error(w, "Bad Request", 400)
+		return
+	} else if len(values) == 1 && values[0] != "" {
+		streamID = values[0]
+	}
+	if streamID == "" {
+		http.Error(w, "Bad Request", 400)
+		return
+	}
+	access := frontend.SessionAccess{Viewer: v, Device: device(r), Protocol: i.protocol}
+	sessions, err := i.host.Sessions.Sessions(r.Context(), access)
+	if err != nil {
+		http.Error(w, "Unavailable", 503)
+		return
+	}
+	for _, session := range sessions {
+		if session.ID != streamID || session.Channel == "" {
+			continue
+		}
+		url, err := i.host.Sessions.StartStream(r.Context(), access, streamID, frontend.StreamRequest{Format: frontend.StreamHLS})
+		if err != nil {
+			streamError(i.protocol, w, err)
+			return
+		}
+		if prefix, ok := r.Context().Value(prefixKey{}).(string); ok {
+			url = prefix + url
+		}
+		id, err := ids.StringGUID(ids.Channel, session.Channel)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		var media frontend.MediaInfo
+		if session.Media != nil {
+			media = *session.Media
+		}
+		media = defaultLiveMediaInfo(media)
+		source := i.detailMediaSourceDTO(id, media)
+		i.shapeLiveMediaSource(source, id, "", streamID, url, media, true)
+		i.mediaSourceDialect(source)
+		if i.protocol == "jellyfin" {
+			i.jellyfinMediaSourceDTO(source, media, true)
+		}
+		if i.protocol == "emby" {
+			i.embyMediaSourceDTO(source, id, media)
+		}
+		jsonReply(w, source)
+		return
+	}
+	http.NotFound(w, r)
+}
+
 func (i *instance) liveStreamsClose(w http.ResponseWriter, r *http.Request) {
 	v, _, err := i.viewer(r)
 	if err != nil || v == nil {
@@ -954,6 +1029,9 @@ func (i *instance) playbackRoutes() error {
 		return err
 	}
 	if err := i.router.Handle("POST", "/LiveStreams/Open", http.HandlerFunc(i.liveStreamsOpen)); err != nil {
+		return err
+	}
+	if err := i.router.Handle("POST", "/LiveStreams/MediaInfo", http.HandlerFunc(i.liveStreamsMediaInfo)); err != nil {
 		return err
 	}
 	if err := i.router.Handle("POST", "/LiveStreams/Close", http.HandlerFunc(i.liveStreamsClose)); err != nil {
