@@ -33,7 +33,7 @@ const (
 	defaultConnections  = 4         // config.Debrid.MaxConnections default
 	minReadAheadBytes   = 8 << 20
 	maxReadAheadBytes   = 32 << 20
-	readAheadSeconds    = 10 // adaptive window: seconds of measured throughput
+	readAheadSeconds    = 10 // adaptive window: seconds of measured reader consumption
 	memBlocksPerFile    = 24 // in-memory blocks per open file (12 MiB)
 	defaultHedgeDelay   = 400 * time.Millisecond
 	idleFileTTL         = 15 * time.Minute
@@ -599,11 +599,15 @@ type remoteFile struct {
 	mem      *lru.Cache[int64, []byte]
 	edges    map[int64][]byte // bounded head/tail, retained independently of streaming LRU
 	stored   map[int64]bool
-	tput     float64      // bytes/s EWMA
+	tput     float64           // bytes/s EWMA
+	ttfbs    [32]time.Duration // bounded recent successful range TTFBs
+	ttfbNext uint64
+	runCount int          // scheduled runs, including admission waits; guarded by bmu
 	playback atomic.Int64 // live source handles that have served foreground reads
 
-	conns   chan struct{} // all requests
-	raSlots chan struct{} // read-ahead and prefetch (leaves one connection for urgent reads)
+	conns       chan struct{} // all requests
+	raSlots     chan struct{} // ordinary read-ahead and prefetch reserve an urgent connection
+	sustainSlot chan struct{} // playback alone may borrow the reserved connection
 
 	// yieldSig is closed when an urgent seek is in flight so prefetch and
 	// read-ahead abandon their connections instead of filling toward the
@@ -618,7 +622,7 @@ func (e *Engine) newFile(id string, p Payload) *remoteFile {
 	f := &remoteFile{e: e, id: id, tag: p.fileTag(), size: p.Size, pl: p,
 		flights: map[int64]*blockFlight{}, mem: lru.New(lru.Options[int64, []byte]{MaxEntries: memBlocksPerFile}), stored: map[int64]bool{}, failedGen: -1,
 		conns: make(chan struct{}, conns), raSlots: make(chan struct{}, max(1, conns-1)),
-		yieldSig: make(chan struct{}), rerouteSem: make(chan struct{}, 1)}
+		sustainSlot: make(chan struct{}, 1), yieldSig: make(chan struct{}), rerouteSem: make(chan struct{}, 1)}
 	f.nblocks = (p.Size + e.block - 1) / e.block
 	f.ctx, f.cancel = context.WithCancel(e.ctx)
 	return f
@@ -1215,8 +1219,16 @@ func (f *remoteFile) startRun(ctx context.Context, idx, n int64, mode fetchMode,
 		f.flights[i] = fl
 		fls = append(fls, fl)
 	}
+	f.runCount++
 	f.bmu.Unlock()
-	go f.fetchRun(ctx, idx, fls, mode, slotHeld)
+	go func() {
+		defer func() {
+			f.bmu.Lock()
+			f.runCount--
+			f.bmu.Unlock()
+		}()
+		f.fetchRun(ctx, idx, fls, mode, slotHeld)
+	}()
 	return fls[0], true
 }
 
@@ -1282,7 +1294,11 @@ func (f *remoteFile) fetchRun(ctx context.Context, first int64, fls []*blockFlig
 		}
 	}
 	if slotHeld {
-		defer func() { <-f.raSlots }()
+		slot := f.raSlots
+		if extra, _ := ctx.Value(sustainSlotKey{}).(bool); extra {
+			slot = f.sustainSlot
+		}
+		defer func() { <-slot }()
 	} else if mode == fetchReadAhead || mode == fetchPrefetch || mode == fetchMetadata {
 		select {
 		case f.raSlots <- struct{}{}:
@@ -1314,6 +1330,10 @@ func (f *remoteFile) fetchRun(ctx context.Context, first int64, fls []*blockFlig
 			body.Close()
 		}
 	}()
+	f.bmu.Lock()
+	f.ttfbs[f.ttfbNext%uint64(len(f.ttfbs))] = tm.ttfb
+	f.ttfbNext++
+	f.bmu.Unlock()
 	var got int64
 	bodyRetries := 0
 	for ; i < len(fls); i++ {
@@ -2225,7 +2245,8 @@ type httpSource struct {
 	raCtx    context.Context
 	raCancel context.CancelFunc
 	closed   bool
-	playing  bool // counted in f.playback until Close
+	playing  bool          // counted in f.playback until Close
+	sustain  sourceSustain // guarded by mu; metered only by foreground reads
 }
 
 func (s *httpSource) Size() int64       { return s.f.size }
@@ -2349,7 +2370,12 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 	if !live {
 		runLen = min(maxRun, max(1, lastBlock-first+1))
 	}
-	var liveRun context.Context
+	var liveRun, meterEpoch context.Context
+	n := 0
+	if live && callerUrgent(ctx) {
+		s.beginConsumption(f.e.now())
+		defer func() { s.recordConsumption(n, off, meterEpoch) }()
+	}
 	readComplete := false
 	if live {
 		s.mu.Lock()
@@ -2377,6 +2403,8 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 		far := first > 2
 		seek := !sequential && (s.last >= 0 || far)
 		if seek {
+			s.sustain.resetRate(f.e.now())
+			s.sustain.playhead = off
 			s.raCancel()
 			s.raCtx, s.raCancel = context.WithCancel(f.ctx)
 			f.beginUrgentSeek()
@@ -2399,6 +2427,7 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 		// Request cancellation still retires the urgent run; joined readers
 		// retry an abandoned flight under their own request context.
 		liveRun = s.raCtx
+		meterEpoch = s.raCtx
 		if concurrent, _ := ctx.Value(concurrentRangeKey{}).(bool); concurrent {
 			liveRun = ctx
 		}
@@ -2409,7 +2438,6 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 			s.readAhead(lastBlock)
 		}
 	}
-	n := 0
 	for idx := first; idx <= lastBlock; idx++ {
 		data, err := f.block(ctx, idx, mode, min(maxRun, max(runLen, lastBlock-idx+1)), liveRun)
 		if err != nil {
@@ -2433,49 +2461,70 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 	return n, nil
 }
 
-// readAhead keeps a throughput-scaled window ahead of the reader in flight,
-// in runs that start at freshRunBlocks and double up to the chunk size.
+// readAhead is topped up only by a live reader; it has no background pump.
 func (s *httpSource) readAhead(from int64) {
 	f := s.f
 	maxRun, _, fixed := f.e.tuning()
 	if fixed < 0 || f.isRateLimited() {
 		return
 	}
-	window := fixed
-	if window == 0 {
-		f.bmu.Lock()
-		tput := f.tput
-		f.bmu.Unlock()
-		window = min(maxReadAheadBytes, max(minReadAheadBytes, int64(tput*readAheadSeconds)))
-	}
 	s.mu.Lock()
-	ctx := s.raCtx
-	closed := s.closed
+	ctx, closed, rate := s.raCtx, s.closed, s.sustain.rate
 	s.mu.Unlock()
 	if closed || ctx.Err() != nil {
 		return
 	}
+	capRuns := min(cap(f.conns), defaultHostConnections)
+	if f.e.limit != nil {
+		p, _ := f.payload()
+		f.e.limit.mu.Lock()
+		hostCap, _ := f.e.limit.limitLocked(dialAddr(p.URL))
+		f.e.limit.mu.Unlock()
+		capRuns = min(capRuns, hostCap)
+	}
+	f.bmu.Lock()
+	tput := f.tput
+	f.bmu.Unlock()
+	window, parallel := sustainPolicy(rate, tput, s.aheadBudget(), fixed, capRuns)
 	lastIdx := min(f.nblocks-1, from+window/f.e.block)
 	run := min(maxRun, freshRunBlocks)
+	if rate > 0 {
+		run = maxRun
+	}
 	for idx := from + 1; idx <= lastIdx; {
 		f.bmu.Lock()
 		present := f.presentLocked(idx)
+		runs := f.runCount
 		f.bmu.Unlock()
 		if present {
 			idx++
 			continue
 		}
-		// Read-ahead runs never queue: a queued run would hold flights a
-		// reader may soon wait on. Without a free slot, the next read
-		// tops the window up.
-		select {
-		case f.raSlots <- struct{}{}:
-		default:
+		if runs >= parallel {
 			return
 		}
+		// Never queue speculative flights. Playback may use the fourth
+		// connection when measured demand requires it; prefetch still uses
+		// only raSlots, and all dials retain their existing priority/cap.
+		runCtx := ctx
+		slot := f.raSlots
+		select {
+		case slot <- struct{}{}:
+		default:
+			if parallel <= cap(f.raSlots) {
+				return
+			}
+			slot = f.sustainSlot
+			select {
+			case slot <- struct{}{}:
+				runCtx = context.WithValue(ctx, sustainSlotKey{}, true)
+			default:
+				return
+			}
+		}
 		n := min(run, lastIdx-idx+1)
-		if _, started := f.startRun(ctx, idx, n, fetchReadAhead, true); !started {
-			<-f.raSlots
+		if _, started := f.startRun(runCtx, idx, n, fetchReadAhead, true); !started {
+			<-slot
 		}
 		idx += n
 		run = min(run*2, maxRun)
