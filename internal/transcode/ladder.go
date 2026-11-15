@@ -127,7 +127,7 @@ func decisionAudioKbps(info core.MediaInfo, d core.Decision) int {
 	case d.AudioCopy:
 		return copiedAudioKbps(a)
 	default:
-		return audioBitrateKbps(d.AudioCodec, outputChannels(d.AudioCodec, a))
+		return audioBitrateKbps(d.AudioCodec, decisionAudioChannels(d, a))
 	}
 }
 
@@ -317,8 +317,10 @@ func (s *Session) Rungs() []core.HLSRung {
 	out := make([]core.HLSRung, 0, len(s.rungs))
 	for t, r := range s.rungs {
 		peak := s.rungPeakKbpsLocked(t)
+		video, videoPeak, codec, dr := qualityMetadata(s.info, r)
 
 		out = append(out, core.HLSRung{
+			VideoBitrate: video, PeakVideoBitrate: videoPeak, Codec: codec, DynamicRange: dr,
 			ID: r.id, Bandwidth: peak * 1000, AverageBandwidth: r.avgKbps * 1000,
 			Width: r.width, Height: r.height, Codecs: r.codecs, OutputCodecs: s.outputCodecs[t], OutputAudioChannels: s.outputAudioChannels[t], FrameRate: fr,
 		})
@@ -415,24 +417,6 @@ func dashRepsLadder(info core.MediaInfo, primary core.Decision, rungs []rung) []
 var _ core.HLSLadderSession = (*Session)(nil)
 var _ core.GoodputSession = (*Session)(nil)
 
-// QualityRungs plans the same ladder used at startup, with no process or IO work.
-func QualityRungs(info core.MediaInfo, decision core.Decision, codecs []string, maxWidth, maxHeight, maxKbps int) []core.HLSRung {
-	var out []core.HLSRung
-	for _, r := range buildRungs(info, decision, adaptiveSettings{Ladder: true, LadderUnderCopy: true})[1:] {
-		allowed := false
-		for _, codec := range codecs {
-			if codec == r.decision.VideoCodec {
-				allowed = true
-			}
-		}
-		if !allowed || (maxWidth > 0 && r.width > maxWidth) || (maxHeight > 0 && r.height > maxHeight) || (maxKbps > 0 && r.peakKbps > maxKbps) {
-			continue
-		}
-		out = append(out, core.HLSRung{ID: r.id, Width: r.width, Height: r.height, Bandwidth: r.peakKbps * 1000, AverageBandwidth: r.avgKbps * 1000})
-	}
-	return out
-}
-
 // PrepareRung requests the existing ladder's segment; it creates no parallel encoder.
 func (s *Session) PrepareRung(ctx context.Context, id string, position time.Duration) error {
 	s.mu.Lock()
@@ -479,12 +463,4 @@ func (m *Manager) ProactiveFallbackAvailable() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return !m.closed
-}
-func QualityDecision(info core.MediaInfo, base core.Decision, id string) (core.Decision, bool) {
-	for _, r := range buildRungs(info, base, adaptiveSettings{Ladder: true, LadderUnderCopy: true})[1:] {
-		if r.id == id {
-			return r.decision, true
-		}
-	}
-	return core.Decision{}, false
 }

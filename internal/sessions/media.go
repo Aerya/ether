@@ -257,13 +257,15 @@ func (b *Broker) StartStream(ctx context.Context, a frontend.SessionAccess, id s
 	}
 	request := core.HLSRequest{LazyStart: req.LazyStart, Diagnostics: req.Continuous, Continuous: req.Continuous, RequireIndependentProof: b.policy(s.public.Protocol).DistributedBindings, SessionID: id, ReleaseID: ps.SourceReleaseID(), InputURL: b.deps.Playback.InputURL(s.playID), Info: ps.Info, Decision: dec, StartOffset: req.Position, SegmentDuration: req.SegmentDuration, Protocol: proto}
 	if req.Continuous && s.public.Protocol == "vela" {
-		rungs, e := b.qualityRungs(ctx, s, viewer)
+		variants, _, e := b.qualityPlan(ctx, s, viewer)
 		if e != nil {
 			return "", e
 		}
 		request.QualityRungs = true
-		for _, rung := range rungs {
-			request.QualityRungIDs = append(request.QualityRungIDs, rung.ID)
+		request.QualityVariants = make([]core.QualityVariant, 0, len(variants))
+		for _, variant := range variants {
+			request.QualityVariants = append(request.QualityVariants, variant)
+			request.QualityRungIDs = append(request.QualityRungIDs, variant.Rung.ID)
 		}
 	}
 	if req.Continuous {

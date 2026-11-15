@@ -22,6 +22,13 @@ func (i *instance) addQualityPaths(ctx context.Context, a frontend.SessionAccess
 	if !ok {
 		return
 	}
+	if provider, ok := i.host.Sessions.(interface {
+		QualityLimitations(context.Context, frontend.SessionAccess, string) ([]frontend.QualityLimitation, error)
+	}); ok {
+		if limits, err := provider.QualityLimitations(ctx, a, id); err == nil && len(limits) > 0 {
+			s.plan["qualityLimitations"] = limits
+		}
+	}
 	rungs, err := q.QualityRungs(ctx, a, id)
 	if err != nil || len(rungs) == 0 {
 		return
@@ -31,7 +38,7 @@ func (i *instance) addQualityPaths(ctx context.Context, a frontend.SessionAccess
 	for _, r := range rungs {
 		pathID := "quality-" + r.ID
 		s.qualityRungs[pathID] = r.ID
-		paths = append(paths, object{"id": pathID, "kind": "transcode", "transport": "hls", "mimeType": "application/vnd.apple.mpegurl", "readiness": "on-demand", "sourceId": paths[0]["sourceId"], "timelineId": paths[0]["timelineId"], "quality": object{"width": r.Width, "height": r.Height, "bitrate": r.Bandwidth}, "qualities": []object{}, "boundaries": []object{}})
+		paths = append(paths, object{"id": pathID, "kind": "transcode", "transport": "hls", "mimeType": "application/vnd.apple.mpegurl", "readiness": "on-demand", "sourceId": paths[0]["sourceId"], "timelineId": paths[0]["timelineId"], "quality": qualityTarget(r), "qualities": []object{}, "boundaries": []object{}})
 	}
 	s.plan["paths"] = paths
 	s.plan["fallback"] = object{"state": "idle"}
@@ -132,4 +139,24 @@ func (i *instance) qualityAllowed(ctx context.Context, a frontend.SessionAccess,
 		}
 	}
 	return false
+}
+
+func qualityTarget(r frontend.HLSRung) object {
+	q := object{"width": r.Width, "height": r.Height, "bitrate": r.Bandwidth, "videoCodec": "", "codecStatus": "pending"}
+	if r.VideoBitrate > 0 {
+		q["videoBitrate"] = r.VideoBitrate
+	}
+	if r.PeakVideoBitrate > 0 {
+		q["peakVideoBitrate"] = r.PeakVideoBitrate
+	}
+	if r.AverageBandwidth > 0 {
+		q["averageBitrate"] = r.AverageBandwidth
+	}
+	if r.Codec != "" {
+		q["codec"] = r.Codec
+	}
+	if r.DynamicRange != "" {
+		q["dynamicRange"] = r.DynamicRange
+	}
+	return q
 }

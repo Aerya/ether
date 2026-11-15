@@ -823,3 +823,13 @@ func (s surface) PrepareQuality(ctx context.Context, a frontend.SessionAccess, i
 	}
 	return q.PrepareQuality(ctx, a, id, rung, pos)
 }
+
+func (s surface) QualityLimitations(ctx context.Context, a frontend.SessionAccess, id string) ([]core.QualityLimitation, error) {
+	q, ok := s.broker.(interface {
+		QualityLimitations(context.Context, frontend.SessionAccess, string) ([]core.QualityLimitation, error)
+	})
+	if !ok || a.Protocol != s.protocol {
+		return nil, core.ErrNotAvailable
+	}
+	return q.QualityLimitations(ctx, a, id)
+}

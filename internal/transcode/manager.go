@@ -749,6 +749,12 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 	}
 	rungs := buildRungs(req.Info, d, adapt)
 	if req.QualityRungs {
+		rungs = rungs[:1]
+		for _, variant := range req.QualityVariants {
+			rungs = append(rungs, qualityRung(req.Info, variant))
+		}
+	}
+	if req.QualityRungs {
 		allowed := rungs[:1]
 		for _, rung := range rungs[1:] {
 			for _, id := range req.QualityRungIDs {

@@ -26,8 +26,9 @@ type HLSRamp struct {
 
 type HLSRequest struct {
 	// QualityRungs explicitly requests the lazy, policy-filtered file-session ladder.
-	QualityRungs   bool
-	QualityRungIDs []string
+	QualityRungs    bool
+	QualityRungIDs  []string
+	QualityVariants []QualityVariant `json:"-"`
 
 	// LazyStart defers the first encoder until the client selects a rendition.
 	LazyStart bool

@@ -30,7 +30,8 @@ func (i *instance) refreshOutput(ctx context.Context, id string, s *playSession)
 				if r.Width <= 0 || r.Height <= 0 || r.Bandwidth <= 0 || r.ID == "" || strings.ContainsAny(r.ID, "/\\?#%\r\n") {
 					continue
 				}
-				q := object{"id": r.ID, "width": r.Width, "height": r.Height, "bitrate": r.Bandwidth, "url": base + r.ID + "/index.m3u8", "videoCodec": "", "codecStatus": "pending"}
+				q := qualityTarget(r)
+				q["id"], q["url"] = r.ID, base+r.ID+"/index.m3u8"
 				if r.OutputCodecs != "" {
 					codecs := strings.Split(r.OutputCodecs, ",")
 					q["videoCodec"], q["codecStatus"] = codecs[0], "verified"
@@ -52,6 +53,11 @@ func (i *instance) refreshOutput(ctx context.Context, id string, s *playSession)
 				}
 				if r.ID == initial {
 					path["initialRenditionId"] = r.ID
+					if path["quality"] != nil {
+						target := qualityTarget(r)
+						target["videoCodec"], target["codecStatus"] = q["videoCodec"], q["codecStatus"]
+						path["quality"] = target
+					}
 				}
 				qualities = append(qualities, q)
 			}
