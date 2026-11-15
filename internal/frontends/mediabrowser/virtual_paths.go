@@ -12,6 +12,13 @@ import (
 // Bounded batches share the host's collision lookup and avoid per-item scans.
 func (i *instance) virtualPaths(r *http.Request, viewer *frontend.Viewer, keys []frontend.RatingKey) map[frontend.RatingKey]string {
 	result := map[frontend.RatingKey]string{}
+	// Jellyfin list paths are file labels, supplied by presentJellyfinFile.
+	// Resolving WebDAV sibling collisions here walks the complete library
+	// even for a twelve-item Resume row. Playback uses the item ID.
+	if i.protocol == "jellyfin" && jellyfinListFile(r) {
+		return result
+	}
+
 	if i.host.VirtualPaths == nil || viewer == nil {
 		return result
 	}

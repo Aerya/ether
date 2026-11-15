@@ -70,12 +70,14 @@ func (a *App) productionExperienceRows(ctx context.Context, req frontend.RowRequ
 	if req.Viewer == nil || a.personalize == nil {
 		return nil, core.ErrNotFound
 	}
-	if req.Purpose == frontend.RowNextUp && !a.personalize.ModelReady(req.Viewer.ID) {
+	// Next Up is viewer history even when a taste model is ready. Building
+	// discovery candidates here visits dozens of unrelated catalogue windows.
+	if req.Purpose == frontend.RowNextUp {
 		limit := req.Limit
 		if limit <= 0 {
 			limit = 20
 		}
-		items, err := a.experienceContinue(ctx, req.Viewer, libraries, visibility, limit)
+		items, err := a.experienceContinueKind(ctx, req.Viewer, libraries, visibility, core.TypeShow, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -123,6 +125,10 @@ func (a *App) productionExperienceRows(ctx context.Context, req frontend.RowRequ
 
 // experienceContinue supplies the shared continue/next-up service with real app dependencies.
 func (a *App) experienceContinue(ctx context.Context, viewer *core.User, libraries []experience.Library, surfaceVis experience.Visibility, limit int) ([]core.Title, error) {
+	return a.experienceContinueKind(ctx, viewer, libraries, surfaceVis, "", limit)
+}
+
+func (a *App) experienceContinueKind(ctx context.Context, viewer *core.User, libraries []experience.Library, surfaceVis experience.Visibility, kind core.MediaType, limit int) ([]core.Title, error) {
 	if a.state == nil || a.catalog == nil || a.safety == nil {
 		return nil, core.ErrNotFound
 	}
@@ -199,7 +205,14 @@ func (a *App) experienceContinue(ctx context.Context, viewer *core.User, librari
 		return a.catalog.Grandchildren(ctx, key)
 	}
 	var loadErr error
-	c := experience.Continue{State: a.state, Now: time.Now, FavoriteShows: a.favoriteShows, GetTitles: getTitles, PrefetchTitles: prefetch, Grandchildren: grandchildren, NextEpisode: a.catalog.NextStoredEpisode, NextEpisodes: a.catalog.NextStoredEpisodes, Visible: visibility.Visible,
+	c := experience.Continue{State: a.state, Now: time.Now, FavoriteShows: a.favoriteShows, GetTitles: getTitles, PrefetchTitles: prefetch, Grandchildren: grandchildren, NextEpisode: a.catalog.NextStoredEpisode, NextEpisodes: func(ctx context.Context, keys []core.RatingKey) (map[core.RatingKey]*core.Title, error) {
+		// Pending SQLite edits overlay persisted flags. Retain the state-aware
+		// walk until those bounded edits have drained, without flushing here.
+		if a.state.HasPendingWatch(viewer.ID) {
+			return a.catalog.NextStoredEpisodes(ctx, keys)
+		}
+		return a.catalog.NextUnwatchedStoredEpisodes(ctx, viewer.ID, keys)
+	}, Visible: visibility.Visible,
 		SameDayUnavailable: func(ctx context.Context, title *core.Title) bool {
 			var source core.AvailabilitySource
 			if a.resolver != nil {
@@ -212,6 +225,9 @@ func (a *App) experienceContinue(ctx context.Context, viewer *core.User, librari
 		},
 		OnError: func(err error) { loadErr = err },
 	}
+	if a.favorites != nil {
+		c.FavoriteShowsFor = a.favorites.HasTitles
+	}
 	if a.episodeorder != nil {
 		c.EpisodeOrder = a.episodeorder
 	}
@@ -219,7 +235,7 @@ func (a *App) experienceContinue(ctx context.Context, viewer *core.User, librari
 		c.Filter = a.discoveryPersonal.FilterContinue
 	}
 	c.Filter = experience.ContinueFilter(c.State, c.Filter)
-	items, _ := c.Row(ctx, viewer, "", limit)
+	items, _ := c.Row(ctx, viewer, kind, limit)
 	return items, loadErr
 }
 
