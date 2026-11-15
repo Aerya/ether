@@ -463,12 +463,14 @@ type authCache struct {
 }
 
 type authEntry struct {
-	pool    *Source
-	auth    *SourceAuth
-	limit   int           // connection limit; 0 is none
-	gap     time.Duration // least time between new provider streams
-	perHour int           // new provider streams per hour; 0 is no cap
-	at      time.Time
+	unratedRating string
+	adultGroups   map[string]bool
+	pool          *Source
+	auth          *SourceAuth
+	limit         int           // connection limit; 0 is none
+	gap           time.Duration // least time between new provider streams
+	perHour       int           // new provider streams per hour; 0 is no cap
+	at            time.Time
 	// disabled caches a paused source, so channel listings and policy checks
 	// need no database read per channel. forgetSourceAuth clears it.
 	disabled bool
@@ -558,7 +560,12 @@ func (s *Service) sourceEntry(ctx context.Context, id string) (authEntry, error)
 		c.mu.Unlock()
 		return authEntry{}, core.ErrNotAvailable
 	}
-	e = authEntry{auth: src.Auth, at: s.o.Now(), perHour: max(src.TunesPerHour, 0)}
+	e = authEntry{auth: src.Auth, at: s.o.Now(), perHour: max(src.TunesPerHour, 0), unratedRating: src.UnratedRating, adultGroups: map[string]bool{}}
+	for _, g := range src.Groups {
+		if g.Adult {
+			e.adultGroups[normGroup(g.Name)] = true
+		}
+	}
 	if src.LoginPool || len(src.Logins) > 0 {
 		e.pool = &Source{ID: src.ID, LoginPool: src.LoginPool, Auth: src.Auth, PlaylistURL: src.PlaylistURL, Account: src.Account, Logins: src.Logins}
 	}

@@ -1641,6 +1641,7 @@
   "m_05742455c0c8cd": "Širší vyhledávání, když první nenašlo nic přehratelného.",
   "m_057540dc872436": "Zatím nezkontrolováno. Zařízení ve vaší síti by měla použít {address}. Ether nepotvrdil, že se mohou připojit.",
   "m_0575616742f24c": "Nikdy níže než pozice pro {title}",
+  "m_0576036bde69c5": "Hodnocení kanálů bez hodnocení",
   "m_0576a36f3b9de8": "Ether byl nainstalován správcem balíčků. Stáhněte nový balíček a nainstalujte ho:",
   "m_0576f94aa5c08a": {
     "few": "{count} vyhledání na disku",
@@ -8799,6 +8800,7 @@
   "m_1d539bf3ad53f2": "0 odvodí limit z vašich připojení k Usenetu.",
   "m_1d53e55257404c": "Účty diváků",
   "m_1d53f68e6961e1": "Největší premiéry bez ohledu na to, co kdo sleduje",
+  "m_1d5405a5b98a38": "Profily s věkovým omezením skryjí kanály bez hodnocení. Vyberte hodnocení, které se má pro tyto kanály použít.",
   "m_1d5550ded8483e": "Nevybráno",
   "m_1d56244b88ecc0": "Rotten Tomatoes – kritici",
   "m_1d56fd7503ad94": "Doplněk Stremio · Torrent",

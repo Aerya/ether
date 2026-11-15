@@ -1569,6 +1569,7 @@
   "m_05742455c0c8cd": "İlk arama oynatılabilir bir şey bulamadığında yapılan daha geniş aramalar.",
   "m_057540dc872436": "Henüz denetlenmedi. Ağınızdaki cihazlar {address} adresini kullanmalı. Ether bağlanabildiklerini doğrulamadı.",
   "m_0575616742f24c": "{title} için şu konumun altında olmasın",
+  "m_0576036bde69c5": "Derecelendirmesi olmayan kanalların derecelendirmesi",
   "m_0576a36f3b9de8": "Ether paket yöneticinizle yüklendi. Yeni paketi indirin, ardından yükleyin:",
   "m_0576f94aa5c08a": {
     "one": "{count} disk sorgusu",
@@ -8364,6 +8365,7 @@
   "m_1d539bf3ad53f2": "0, sınırı Usenet bağlantılarınızdan türetir.",
   "m_1d53e55257404c": "İzleyici hesapları",
   "m_1d53f68e6961e1": "Kim ne izlerse izlesin en büyük çıkışlar",
+  "m_1d5405a5b98a38": "Derecelendirme sınırı olan profiller, derecelendirmesi olmayan kanalları gizler. Bu kanallar için geçerli olacak derecelendirmeyi seçin.",
   "m_1d5550ded8483e": "Seçim yok",
   "m_1d56244b88ecc0": "Rotten Tomatoes eleştirmenleri",
   "m_1d56fd7503ad94": "Stremio eklentisi · Torrent",

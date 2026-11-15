@@ -25,12 +25,13 @@ type GuideGroup struct {
 	Name     string `json:"name"`
 }
 type OwnerGuide struct {
-	Channels []string     `json:"channels,omitempty"`
-	ID       string       `json:"id"`
-	Name     string       `json:"name"`
-	Groups   []GuideGroup `json:"groups"`
-	All      bool         `json:"all,omitempty"`
-	Hidden   bool         `json:"hidden,omitempty"`
+	UnratedRating string       `json:"unratedRating,omitempty"`
+	Channels      []string     `json:"channels,omitempty"`
+	ID            string       `json:"id"`
+	Name          string       `json:"name"`
+	Groups        []GuideGroup `json:"groups"`
+	All           bool         `json:"all,omitempty"`
+	Hidden        bool         `json:"hidden,omitempty"`
 }
 type guideChoice struct {
 	GuideGroup
@@ -171,6 +172,9 @@ func (s *Service) SaveOwnerGuides(ctx context.Context, gs []OwnerGuide) error {
 		return err
 	}
 	if err = tx.Commit(); err == nil {
+		s.guideRatingsMu.Lock()
+		s.guideRatings = nil
+		s.guideRatingsMu.Unlock()
 		s.bumpLineup()
 	}
 	return err

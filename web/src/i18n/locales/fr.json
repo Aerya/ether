@@ -1605,6 +1605,7 @@
   "m_05742455c0c8cd": "Recherches élargies quand la première n’a rien trouvé de lisible.",
   "m_057540dc872436": "Pas encore vérifié. Les appareils de votre réseau devraient utiliser {address}. Ether n'a pas confirmé qu'ils peuvent se connecter.",
   "m_0575616742f24c": "Jamais en dessous de la position pour {title}",
+  "m_0576036bde69c5": "Classification des chaînes sans classification",
   "m_0576a36f3b9de8": "Ether a été installé avec votre gestionnaire de paquets. Téléchargez le nouveau paquet, puis installez-le :",
   "m_0576f94aa5c08a": {
     "many": "{count} de consultations du disque",
@@ -8576,6 +8577,7 @@
   "m_1d539bf3ad53f2": "0 déduit la limite de vos connexions Usenet.",
   "m_1d53e55257404c": "Comptes spectateurs",
   "m_1d53f68e6961e1": "Les plus grosses sorties, quoi que chacun regarde",
+  "m_1d5405a5b98a38": "Les profils avec une limite de classification masquent les chaînes sans classification. Choisissez la classification à appliquer à ces chaînes.",
   "m_1d5550ded8483e": "Aucun choix",
   "m_1d56244b88ecc0": "Critiques Rotten Tomatoes",
   "m_1d56fd7503ad94": "Addon Stremio · Torrent",

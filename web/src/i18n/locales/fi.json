@@ -1569,6 +1569,7 @@
   "m_05742455c0c8cd": "Laajemmat haut, kun ensimmäinen haku ei löytänyt mitään toistettavaa.",
   "m_057540dc872436": "Ei vielä tarkistettu. Verkkosi laitteiden pitäisi käyttää osoitetta {address}. Ether ei ole vahvistanut, että ne voivat yhdistää.",
   "m_0575616742f24c": "Ei koskaan paikan alapuolella: {title}",
+  "m_0576036bde69c5": "Ikäraja kanaville, joilla ei ole sitä",
   "m_0576a36f3b9de8": "Ether asennettiin paketinhallinnalla. Lataa uusi paketti ja asenna se:",
   "m_0576f94aa5c08a": {
     "one": "{count} levyhaku",
@@ -8364,6 +8365,7 @@
   "m_1d539bf3ad53f2": "0 johtaa rajan Usenet-yhteyksistäsi.",
   "m_1d53e55257404c": "Katselijatilit",
   "m_1d53f68e6961e1": "Suurimmat julkaisut riippumatta siitä, mitä kukin katsoo",
+  "m_1d5405a5b98a38": "Profiilit, joissa on ikärajarajoitus, piilottavat kanavat, joilla ei ole ikärajaa. Valitse näille kanaville käytettävä ikäraja.",
   "m_1d5550ded8483e": "Ei valintaa",
   "m_1d56244b88ecc0": "Rotten Tomatoesin kriitikot",
   "m_1d56fd7503ad94": "Stremio-lisäosa · Torrent",

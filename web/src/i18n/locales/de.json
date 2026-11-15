@@ -1569,6 +1569,7 @@
   "m_05742455c0c8cd": "Breitere Suchen, wenn die erste Suche nichts Abspielbares gefunden hat.",
   "m_057540dc872436": "Noch nicht geprüft. Geräte in deinem Netzwerk sollten {address} nutzen. Ether hat nicht bestätigt, dass sie verbinden können.",
   "m_0575616742f24c": "Nie unter Position für {title}",
+  "m_0576036bde69c5": "Altersfreigabe für Kanäle ohne Angabe",
   "m_0576a36f3b9de8": "Ether wurde mit deinem Paketmanager installiert. Lade das neue Paket herunter und installiere es:",
   "m_0576f94aa5c08a": {
     "one": "{count} Festplattenabfrage",
@@ -8364,6 +8365,7 @@
   "m_1d539bf3ad53f2": "0 leitet das Limit aus deinen Usenet-Verbindungen ab.",
   "m_1d53e55257404c": "Zuschauerkonten",
   "m_1d53f68e6961e1": "Die größten Filmstarts, egal was jemand schaut",
+  "m_1d5405a5b98a38": "Profile mit einer Altersgrenze blenden Kanäle ohne Altersfreigabe aus. Wähle die Altersfreigabe, die für diese Kanäle gelten soll.",
   "m_1d5550ded8483e": "Keine Wahl",
   "m_1d56244b88ecc0": "Rotten Tomatoes Kritiker",
   "m_1d56fd7503ad94": "Stremio-Addon · Torrent",

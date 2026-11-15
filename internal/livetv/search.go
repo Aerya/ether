@@ -439,7 +439,7 @@ func (s *Service) searchAllowedChannels(ctx context.Context, viewer *core.Viewer
 		} else if a, ok := airing[c.ID]; ok {
 			p = &a
 		}
-		if p == nil && viewer != nil && (viewer.MaxContentRating != "" || policy.MaxRating != "") {
+		if p == nil && c.Kind == "virtual" && viewer != nil && (viewer.MaxContentRating != "" || policy.MaxRating != "") {
 			continue
 		}
 		if s.allowedProgramme(ctx, viewer, c, p) {
