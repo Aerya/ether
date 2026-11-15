@@ -705,12 +705,13 @@ func (b *broadcast) run() {
 		scheduled := b.origin.Add(time.Duration(b.tick) * time.Second * time.Duration(b.format.FPSDen) / time.Duration(b.format.FPSNum))
 		// A live input's burst spends its provider backlog, the server
 		// reserve: it stops at its target lead, not at a published edge
-		// that trails the encoder.
+		// that trails the encoder. File inputs allow two encoder segments of
+		// headroom, but stop bursting at that bound even if publication lags.
 		headroom := b.startupTarget + 2*b.segment
 		if b.burstNoWait {
 			headroom = b.startupTarget
 		}
-		b.bursting = !b.startupUntil.IsZero() && now.Before(b.startupUntil) && !b.startupOutputReady(now) && (!b.burstNoWait || scheduled.Sub(now) < headroom)
+		b.bursting = !b.startupUntil.IsZero() && now.Before(b.startupUntil) && !b.startupOutputReady(now) && scheduled.Sub(now) < headroom
 		if !b.startupUntil.IsZero() && !b.bursting {
 			b.lead = max(0, min(headroom, scheduled.Sub(now)))
 			b.startupUntil = time.Time{}
