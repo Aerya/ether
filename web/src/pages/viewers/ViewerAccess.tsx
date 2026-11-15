@@ -452,7 +452,7 @@ export function ViewerAccess({ viewer }: { viewer: Viewer }) {
                     control={
                       <div className="w-64">
                         <TimeZoneSelect
-                          serverDefault
+                          serverDefault={!!p.bedtime || p.allowedHours.length === 0}
                           value={p.timezone}
                           onChange={(timezone) =>
                             patchPolicy({
