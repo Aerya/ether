@@ -87,6 +87,11 @@ func (s *Server) childQuery(ctx context.Context, pr *Request, items []frontend.T
 // These are request options, not catalogue fields. Keep this children-specific:
 // the section query editor has its own PMS-compatible validation semantics.
 func childQueryParamIgnored(key string) bool {
+	// Search clients carry this hub-scope option onto metadata children reads.
+	// It does not filter seasons or episodes, even when its value is 0.
+	if key == "libraryHubsOnly" {
+		return true
+	}
 	// skipCount is a watch predicate, despite sharing the skip option prefix.
 	if key == "limit" || key == "group" || strings.TrimRight(key, "!<>=") == "skipCount" {
 		return false
