@@ -34,6 +34,8 @@ CREATE TABLE livetv_policies(user_id INTEGER PRIMARY KEY, data TEXT NOT NULL);`)
 }
 
 type Service struct {
+	guideRatingsMu                            sync.Mutex
+	guideRatings                              *guideRatingIndex
 	searchDemanded                            atomic.Bool
 	searchVirtualMu                           sync.Mutex
 	searchVirtualSnapshots                    map[string]virtualSearchIndexedSnapshot
@@ -1091,8 +1093,11 @@ func (s *Service) SaveChannel(ctx context.Context, c Channel) (Channel, error) {
 	if c.ID == "" {
 		c.ID = randomID()
 	}
-	if c.LogoMatched {
+	if c.LogoMatched || c.Kind == "iptv" {
 		old, err := s.Channel(ctx, c.ID)
+		if err == nil {
+			c.ProviderAdult = old.ProviderAdult
+		}
 		if err != nil || !old.LogoMatched || old.Logo != c.Logo {
 			c.LogoMatched = false
 		}
@@ -1281,18 +1286,14 @@ func (s *Service) allowedWithLookup(ctx context.Context, u *core.User, c Channel
 	if !u.IsOwner && !pol.Permits(c.ID, c.Private) {
 		return false
 	}
-	if p != nil && strings.HasPrefix(p.Item.Slate, "plugin:") && p.Item.Rating == "" && (u.MaxContentRating != "" || pol.MaxRating != "") {
+	if c.Kind != "iptv" && p != nil && strings.HasPrefix(p.Item.Slate, "plugin:") && p.Item.Rating == "" && (u.MaxContentRating != "" || pol.MaxRating != "") {
 		return false
 	}
-	rating := c.Rating
-	if p != nil {
-		rating = p.Item.Rating
-		if rating == "" {
-			rating = c.Rating
+	if u.MaxContentRating != "" || pol.MaxRating != "" {
+		rating := s.channelContentRating(ctx, c, p)
+		if contentrating.Exceeds(rating, u.MaxContentRating) || contentrating.Exceeds(rating, pol.MaxRating) {
+			return false
 		}
-	}
-	if contentrating.Exceeds(rating, u.MaxContentRating) || contentrating.Exceeds(rating, pol.MaxRating) {
-		return false
 	}
 	if p != nil && p.Item.Key != 0 && (lookup != nil || strict) {
 		if lookup == nil {

@@ -276,6 +276,7 @@ export type ProviderLogin = {
   error?: string;
 };
 export type Source = {
+  unratedRating?: string;
   logins?: ProviderLogin[];
   disabled?: boolean;
   useLiveTV?: boolean;
@@ -310,6 +311,7 @@ export type Source = {
 } & GroupRules &
   SourceLimitRules;
 export type SourceDraft = {
+  unratedRating?: string;
   logins?: ProviderLogin[];
   disabled?: boolean;
   useLiveTV?: boolean;

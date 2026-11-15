@@ -1569,6 +1569,7 @@
   "m_05742455c0c8cd": "Bredere zoekopdrachten als de eerste zoekopdracht niets afspeelbaars vond.",
   "m_057540dc872436": "Nog niet gecontroleerd. Apparaten in je netwerk moeten {address} gebruiken. Ether heeft niet bevestigd dat ze kunnen verbinden.",
   "m_0575616742f24c": "Nooit onder positie voor {title}",
+  "m_0576036bde69c5": "Classificatie voor kanalen zonder classificatie",
   "m_0576a36f3b9de8": "Ether is geïnstalleerd met je pakketbeheerder. Download het nieuwe pakket en installeer het:",
   "m_0576f94aa5c08a": {
     "one": "{count} opzoeking op schijf",
@@ -8366,6 +8367,7 @@
   "m_1d539bf3ad53f2": "0 leidt de limiet af van je Usenet-verbindingen.",
   "m_1d53e55257404c": "Kijkersaccounts",
   "m_1d53f68e6961e1": "De grootste releases, wat iedereen ook kijkt",
+  "m_1d5405a5b98a38": "Profielen met een classificatielimiet verbergen kanalen zonder classificatie. Kies de classificatie die voor deze kanalen moet gelden.",
   "m_1d5550ded8483e": "Geen keuze",
   "m_1d56244b88ecc0": "Rotten Tomatoes-critici",
   "m_1d56fd7503ad94": "Stremio-add-on · Torrent",

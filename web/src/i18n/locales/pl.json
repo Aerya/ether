@@ -1641,6 +1641,7 @@
   "m_05742455c0c8cd": "Szersze wyszukiwania, gdy pierwsze nie znalazło nic do odtworzenia.",
   "m_057540dc872436": "Jeszcze nie sprawdzono. Urządzenia w twojej sieci powinny używać {address}. Ether nie potwierdził, że mogą się połączyć.",
   "m_0575616742f24c": "Nigdy niżej niż pozycja dla: {title}",
+  "m_0576036bde69c5": "Klasyfikacja kanałów bez klasyfikacji",
   "m_0576a36f3b9de8": "Ether został zainstalowany menedżerem pakietów. Pobierz nowy pakiet, a następnie go zainstaluj:",
   "m_0576f94aa5c08a": {
     "few": "{count} odczyty z dysku",
@@ -8801,6 +8802,7 @@
   "m_1d539bf3ad53f2": "0 wylicza limit na podstawie Twoich połączeń Usenet.",
   "m_1d53e55257404c": "Konta widzów",
   "m_1d53f68e6961e1": "Największe premiery, niezależnie od tego, co kto ogląda",
+  "m_1d5405a5b98a38": "Profile z ograniczeniem wiekowym ukrywają kanały bez klasyfikacji. Wybierz klasyfikację, która ma być stosowana do tych kanałów.",
   "m_1d5550ded8483e": "Brak wyboru",
   "m_1d56244b88ecc0": "Krytycy Rotten Tomatoes",
   "m_1d56fd7503ad94": "Dodatek Stremio · Torrent",
