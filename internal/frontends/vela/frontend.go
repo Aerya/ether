@@ -77,6 +77,9 @@ type instance struct {
 	aiMu         sync.Mutex
 	aiJobs       map[string]*aiSearchJob
 	aiActive     int
+	warmMu       sync.Mutex
+	warmClients  map[string]negotiatedClient
+	warmPending  map[string]bool
 }
 
 func (i *instance) Handler() http.Handler { return http.HandlerFunc(i.serve) }
@@ -405,6 +408,7 @@ func (i *instance) negotiate(w http.ResponseWriter, r *http.Request) {
 				problem(w, 400, "request", "unsupported_client_build")
 				return
 			}
+			i.rememberNegotiatedClient(r, b.Client)
 			send(w, 200, object{"capabilities": i.requestCapabilities(r), "client": b.Client})
 			return
 		}

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/braedonsaunders/ether/internal/frontend"
-	"github.com/braedonsaunders/ether/internal/frontend/kit/caps"
 	"github.com/braedonsaunders/ether/internal/frontend/kit/ids"
 	"math"
 	"net/http"
@@ -157,18 +156,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 		i.unavailable(w, r)
 		return
 	}
-	profile := caps.DeviceProfile{MaxStreamingBitrate: b.Client.MaxBitrate, DirectPlayProfiles: []caps.DirectPlayProfile{{Type: "Video", Container: strings.Join(b.Client.Containers, ","), VideoCodec: strings.Join(b.Client.VideoCodecs, ","), AudioCodec: strings.Join(b.Client.AudioCodecs, ",")}}}
-	if b.Client.HLS || b.Client.MSE {
-		container := "mp4"
-		profile.TranscodingProfiles = []caps.TranscodingProfile{{Type: "Video", Protocol: "hls", Container: container, VideoCodec: strings.Join(b.Client.VideoCodecs, ","), AudioCodec: strings.Join(b.Client.AudioCodecs, ",")}}
-	}
-	for _, format := range b.Client.SubtitleFormats {
-		if (b.Client.HLS || b.Client.MSE) && format == "webvtt" {
-			profile.SubtitleProfiles = append(profile.SubtitleProfiles, caps.SubtitleProfile{Format: "ether-vtt-window", Method: "External"})
-		}
-		profile.SubtitleProfiles = append(profile.SubtitleProfiles, caps.SubtitleProfile{Format: format, Method: "External"})
-	}
-	declared, e := i.host.Capabilities.Build(i.identityContext(r), frontend.CapabilityRequest{Viewer: v, Device: caps.DeviceInfo{Protocol: "vela", Product: "Vela", Platform: b.Client.Device.Platform, Version: b.Client.Device.AppVersion, ClientID: b.Client.Device.ID, DeviceName: b.Client.Device.Name, VideoCodecs: b.Client.VideoCodecs, AudioCodecs: b.Client.AudioCodecs, Containers: b.Client.Containers, SubtitleCodecs: b.Client.SubtitleFormats, MaxHeight: b.Client.MaxHeight, MaxBitrateKbps: b.Client.MaxBitrate / 1000}, Profile: profile, UserAgent: r.UserAgent()})
+	declared, e := i.clientCapabilities(r, v, b.Client)
 	if e != nil {
 		fail(w, e)
 		return

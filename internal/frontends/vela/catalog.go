@@ -458,6 +458,7 @@ func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	i.warmDetail(r, v, d)
 	cache(w, r, out)
 }
 func (i *instance) children(w http.ResponseWriter, r *http.Request) {
