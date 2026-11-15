@@ -2,6 +2,7 @@ package vela
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -96,6 +97,31 @@ func (i *instance) writeTokenResult(w http.ResponseWriter, r *http.Request, acce
 			fail(w, err)
 			return
 		}
+	}
+	if response.Status == http.StatusOK {
+		resolver, ok := i.host.Identity.(frontend.DeviceIdentity)
+		if !ok {
+			fail(w, frontend.ErrUnauthorized)
+			return
+		}
+		v, _, err := resolver.ResolveDevice(r.Context(), access, d)
+		if err != nil || v == nil {
+			fail(w, frontend.ErrUnauthorized)
+			return
+		}
+		viewer, err := i.viewerPolicyWire(r, v, d)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		var result object
+		if err := json.Unmarshal(response.Body, &result); err != nil {
+			fail(w, err)
+			return
+		}
+		result["viewer"] = viewer
+		send(w, http.StatusOK, result)
+		return
 	}
 	for k, v := range response.Header {
 		w.Header()[k] = v

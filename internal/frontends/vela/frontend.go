@@ -103,6 +103,12 @@ func problem(w http.ResponseWriter, status int, class, code string) {
 	send(w, status, object{"error": object{"class": class, "code": code, "message": strings.ReplaceAll(code, "_", " "), "retry": object{"allowed": false}}})
 }
 func fail(w http.ResponseWriter, err error) {
+	var bedtime *frontend.ErrBedtime
+	if errors.As(err, &bedtime) {
+		send(w, http.StatusForbidden, object{"error": object{"class": "policy", "code": "bedtime", "message": bedtime.Error(), "nextAllowedAt": bedtime.NextAllowedAt.UTC().Format(time.RFC3339), "retry": object{"allowed": false}}})
+		return
+	}
+
 	switch {
 	case errors.Is(err, frontend.ErrInteractionReceipt):
 		problem(w, 400, "request", "invalid_receipt")

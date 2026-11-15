@@ -359,7 +359,12 @@ func (i *instance) bootstrap(w http.ResponseWriter, r *http.Request) {
 			heroes, shelves = heroesFromRows(append(rows, fill...), sources)
 		}
 	}
-	out := object{"viewer": viewerWire(v), "capabilities": i.requestCapabilities(r), "defaultSkinId": "default", "rows": shelves}
+	viewer, err := i.viewerPolicyWire(r, v, requestDevice(r))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	out := object{"viewer": viewer, "capabilities": i.requestCapabilities(r), "defaultSkinId": "default", "rows": shelves}
 	if len(heroes) > 0 {
 		ids := make([]string, 0, len(heroes))
 		for _, hero := range heroes {
