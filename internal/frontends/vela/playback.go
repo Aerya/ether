@@ -123,10 +123,6 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	options := frontend.DecideOptions{MaxWidth: b.Client.MaxWidth, MaxHeight: b.Client.MaxHeight, MaxBitrateKbps: b.Client.MaxBitrate / 1000, DirectPlay: true, DirectStream: b.Client.HLS || b.Client.MSE, AudioStream: -1, SubtitleStream: -1}
-	if b.Client.MSE {
-		options.ToneMapMaxHeight = 720
-		options.ToneMapMaxBitrateKbps = 4000
-	}
 	audioSet, subtitleSet := false, false
 	if b.AudioTrackID != "" {
 		n, err := strconv.Atoi(b.AudioTrackID)

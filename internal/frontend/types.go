@@ -125,8 +125,8 @@ type RangeRepresentation = core.RangeRepresentation
 var WithRangeResponse = core.WithRangeResponse
 var IsGrantCredential = core.IsGrantCredential
 
-
 // HLS output evidence is shared with adapters without exposing the encoder.
 type HLSRung = core.HLSRung
+type QualityLimitation = core.QualityLimitation
 type HLSDiagnosticSession = core.HLSDiagnosticSession
 type HLSPreparationEvent = core.HLSPreparationEvent

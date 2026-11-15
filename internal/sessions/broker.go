@@ -354,6 +354,7 @@ func copyRequest(r frontend.PlanRequest) frontend.PlanRequest {
 	r.Caps.Containers = slices.Clone(r.Caps.Containers)
 	r.Caps.HLSContainers = slices.Clone(r.Caps.HLSContainers)
 	r.Caps.SubtitleCodecs = slices.Clone(r.Caps.SubtitleCodecs)
+	r.Caps.HDRFormats = slices.Clone(r.Caps.HDRFormats)
 	r.Caps.DVProfiles = slices.Clone(r.Caps.DVProfiles)
 	r.Caps.VideoLevels = maps.Clone(r.Caps.VideoLevels)
 	r.Caps.VideoMaxHeights = maps.Clone(r.Caps.VideoMaxHeights)
