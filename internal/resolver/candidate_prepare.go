@@ -74,6 +74,7 @@ func (s *Service) validateOne(ctx context.Context, rel core.Release) validation 
 }
 
 type candidateCheck struct {
+	retained         bool      // ownership transferred to ready-source validation
 	started          time.Time // includes time spent checking during source discovery
 	done             chan struct{}
 	cancel           context.CancelFunc
@@ -106,29 +107,36 @@ type pendingPrep struct {
 	consumed bool
 }
 
-// Owned by one Resolve call. Its deferred close cancels and joins every
-// speculative check even when another source wins or the client leaves.
+// Owned by one Resolve call. Its deferred close cancels and joins speculative
+// checks unless ready-source validation explicitly takes ownership.
 type candidateChecks struct {
 	all   []*candidateCheck
 	preps []*pendingPrep
 }
 
 func (c *candidateChecks) start(ctx context.Context, s *Service, rel core.Release) *candidateCheck {
-	ctx, cancel := context.WithTimeout(ctx, candidateBudget)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), candidateBudget)
+	stop := context.AfterFunc(s.bgCtx, cancel)
 	f := &candidateCheck{started: time.Now(), done: make(chan struct{}), cancel: cancel}
 	c.all = append(c.all, f)
-	go func() { defer close(f.done); defer cancel(); f.result = s.validateOne(ctx, rel) }()
+	go func() { defer close(f.done); defer cancel(); defer stop(); f.result = s.validateOne(ctx, rel) }()
 	return f
 }
 
 func (c *candidateChecks) close() {
 	for _, f := range c.all {
+		if f.retained {
+			continue
+		}
 		f.cancel()
 	}
 	for _, p := range c.preps {
 		p.cancel()
 	}
 	for _, f := range c.all {
+		if f.retained {
+			continue
+		}
 		<-f.done
 	}
 	for _, p := range c.preps {

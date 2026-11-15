@@ -704,6 +704,9 @@ func (s *Service) resolve(ctx context.Context, req core.ResolveRequest, profile 
 	trace.Limits = &TraceLimits{ProfileMinHeight: profile.MinHeight, ProfileMaxHeight: profile.MaxHeight, ProfileConfiguredMaxHeight: traceConfiguredMaxHeight(profile), ClientMaxHeight: req.Client.MaxHeight, ClientMaxBitrateKbps: req.Client.MaxBitrateKbps, AllowHDR: profile.AllowHDR, AllowDolbyVision: profile.AllowDolbyVision}
 	defer func() {
 		trace.TotalDuration = time.Since(started)
+		if !core.IsSpeculative(ctx) && !channelAvailabilityCheck(ctx) {
+			s.logPlayDecision(trace)
+		}
 		trace.Ceiling = s.explainCeiling(&trace, profile, req)
 		noteChooser(&trace, req)
 		if trace.Ceiling != "" {

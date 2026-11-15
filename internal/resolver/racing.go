@@ -108,12 +108,17 @@ func (s *Service) resolutionSkipping(key core.RatingKey, cands []candidate, winn
 	// edition come before other cuts (ranked order within each group).
 	edition := cands[winner].rel.Info.Edition
 	for _, same := range []bool{true, false} {
-		for i, c := range cands {
-			if i == winner || skip(c) || len(res.Alternates) >= s.maxCandidates() {
-				continue
-			}
-			if (c.rel.Info.Edition == edition) == same {
-				res.Alternates = append(res.Alternates, c.rel)
+		// Keep a cached equivalent inside the bounded alternate list even
+		// when source preference put many Usenet releases ahead of it.
+		for _, ready := range []bool{true, false} {
+			for i, c := range cands {
+				cachedPeer := s.readyPeer([]candidate{cands[winner], c}) == 1
+				if i == winner || skip(c) || cachedPeer != ready || len(res.Alternates) >= s.maxCandidates() {
+					continue
+				}
+				if (c.rel.Info.Edition == edition) == same {
+					res.Alternates = append(res.Alternates, c.rel)
+				}
 			}
 		}
 	}
@@ -123,8 +128,14 @@ func (s *Service) resolutionSkipping(key core.RatingKey, cands []candidate, winn
 // validateCandidates races bounded groups when enabled. Ranked mode still starts
 // two checks together, preferring rank order during a short grace. A healthy
 // equivalent can then bypass a stalled preferred source without losing quality.
-// Every worker is cancelled and joined before this function returns.
+// Losing checks are cancelled and joined, except an already-running fallback
+// retained by ready-source validation under the service shutdown lifecycle.
 func (s *Service) validateCandidates(ctx context.Context, cands []candidate, tr *Trace, race int) (int, []byte, error) {
+	if !core.IsSpeculative(ctx) && !channelAvailabilityCheck(ctx) {
+		if peer := s.readyPeer(cands); peer >= 0 {
+			return s.validateReady(ctx, cands, tr, peer)
+		}
+	}
 	if len(cands) > 0 && cands[0].fallback {
 		// Even an owner-enabled health race must preserve fallback tier order.
 		race = 1
