@@ -15,7 +15,8 @@
 # ---- build the web console (embedded by go:embed) --------------------------
 FROM --platform=$BUILDPLATFORM node:25-alpine AS web
 ENV NODE_OPTIONS="--max-old-space-size=4096"
-RUN corepack enable && corepack prepare pnpm@10 --activate
+# Node 25 no longer bundles Corepack. Keep pnpm on the same major as CI.
+RUN npm install --global pnpm@10
 WORKDIR /src/web
 COPY web/package.json web/pnpm-lock.yaml web/.pnpmfile.cjs ./
 RUN pnpm install --frozen-lockfile
