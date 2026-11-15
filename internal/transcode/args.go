@@ -651,10 +651,44 @@ func buildCodecArgs(s runSpec) []string {
 		// Shift only decode time; presentation time must retain source order.
 		args = appendVideoClockBSF(args, "setts=pts=PTS:dts=DTS-"+strconv.FormatFloat(fastLead.Seconds(), 'f', 9, 64)+"/TB")
 	}
+	lead = max(lead, hlsEncodedClockLead(s))
 	if lead > 0 {
 		args = append(args, "-output_ts_offset", strconv.FormatFloat(lead.Seconds(), 'f', 9, 64))
 	}
 	return args
+}
+
+// hlsEncodedClockLead fixes the mux clock before any packets arrive. Using
+// the same encoder plan for every run and rendition keeps priming and video
+// reorder from causing a title-zero-only shift in the nested MP4 muxer.
+func hlsEncodedClockLead(s runSpec) time.Duration {
+	if !s.encodesAudio() || s.Decision.VideoCopy || s.LoopInput || s.LiveInput || s.RTXTimeline || s.Decision.Container != ContainerFMP4 || (s.Protocol != "" && s.Protocol != core.ProtocolHLS) {
+		return 0
+	}
+	codec := s.Decision.AudioCodec
+	priming := 0.0
+	switch codec {
+	case "", "aac":
+		priming = 1024.0 / float64(decisionAudioRate(s.Decision))
+	case "opus":
+		if s.Features.encoders == nil || s.Features.hasEncoder("libopus") {
+			priming = 0.0065
+		}
+	}
+	if priming == 0 {
+		return 0
+	}
+	encoder, _ := videoEncoder(s.Decision.VideoCodec, s.Accel, s.Features)
+	if encoder != "libx264" && encoder != "h264_nvenc" {
+		return 0
+	}
+	if s.RampClock {
+		s.FastStart = false
+	}
+	if fps := hlsOutputFPS(s); fps > 0 {
+		priming = math.Max(priming, float64(h264ReorderFrames(s))/fps)
+	}
+	return time.Duration(math.Ceil(priming * float64(time.Second)))
 }
 
 // hlsAudioPreroll warms the AAC encoder on its original sample grid. Only
@@ -964,11 +998,10 @@ func hlsMuxArgs(s runSpec) []string {
 			options += ":use_editlist=0"
 		}
 		if s.NormalizeNegativeDTS || audioOnlyAAC || s.encodesAudio() {
-			// The inner MP4 muxer's automatic timestamp policy otherwise
-			// rebases positive audio starts too. Shift only negative priming
-			// at title zero; preserve positive seek timestamps unchanged.
-			// This is muxer-wide: video and audio move together, preserving
-			// sync for any encoder delay (not just AAC's 1024 samples).
+			// Planned H264 encodes already carry a fixed priming/reorder
+			// lead on every run. Keep this safety net for copied video and
+			// other encoder plans, where negative priming must not wrap.
+			// Unlike the automatic policy it preserves positive seek times.
 			options += ":avoid_negative_ts=make_non_negative"
 		}
 		if s.VideoTimescale != 0 {

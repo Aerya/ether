@@ -343,6 +343,11 @@ func (s *Service) admitSteady(ctx context.Context, c Channel) (*steadyAdmission,
 	if probed == nil && silent {
 		return nil, steadyRefusedVideoOnly, "all playable candidates lack audio; trying direct fallback", nil
 	}
+	if probed == nil && s.coldFallbackAllowed(c) && ctx.Err() == nil {
+		// Start the selected slate on the continuous output. Its planner
+		// keeps retrying the provider without interrupting the viewer.
+		probed = &steadyAdmission{shape: steadyShapeFor(nil)}
+	}
 	if probed == nil {
 		if probeCtx.Err() != nil && len(failures) == 0 {
 			last = probeCtx.Err()

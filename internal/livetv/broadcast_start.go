@@ -157,6 +157,16 @@ func (s *Service) useBroadcast(c Channel) bool {
 	}
 	return c.Kind == "iptv" && (c.Screens == nil || c.Screens.NoSignal != "error")
 }
+
+// coldFallbackAllowed distinguishes an owner-selected outage screen from the
+// default reconnecting screen used after a provider has already aired.
+func (s *Service) coldFallbackAllowed(c Channel) bool {
+	if !s.useBroadcast(c) || s.screenStyle(c, false) == "error" {
+		return false
+	}
+	return c.Kind == "virtual" || (c.Screens != nil && c.Screens.NoSignal != "") || (c.Look != nil && c.Look.LookID != "")
+}
+
 func (s *Service) screenRequest(c Channel, reason string) core.ClipRequest {
 	offair := reason == offAirSlate
 	style := s.screenStyle(c, offair)
@@ -450,7 +460,7 @@ func (s *Service) startBroadcast(ctx context.Context, ss *session) error {
 	ss.broadcast = lease
 	ss.info.MediaInfo = &info
 	ss.mu.Unlock()
-	if provider, ok := lease.broadcast.planner.(*providerBroadcastPlanner); ok {
+	if provider, ok := lease.broadcast.planner.(*providerBroadcastPlanner); ok && !s.coldFallbackAllowed(c) {
 		if err := provider.awaitFirstPicture(ctx); err != nil {
 			lease.close()
 			s.broadcasts.discardCold(lease.broadcast)

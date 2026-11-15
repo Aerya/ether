@@ -154,7 +154,9 @@ func TestHLSMuxedEncoderPriming(t *testing.T) {
 						// to 1536-sample packets. Both remain on the absolute clock.
 						expected := start.Seconds()
 						if !tc.copyVideo {
-							expected = hlsAudioRestartCut(s)
+							// The restart cut is on the unshifted sample grid;
+							// every run uses the same planned mux-clock origin.
+							expected = hlsAudioRestartCut(s) + hlsEncodedClockLead(s).Seconds()
 						}
 						if math.Abs(a-expected) > 1536.0/48000+frame {
 							t.Fatalf("absolute audio clock lost: %v %v expected=%f", start, first, expected)
