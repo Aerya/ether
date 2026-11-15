@@ -61,7 +61,32 @@ func (s *playSession) outputSnapshot() *playSession {
 		canBurn: s.canBurn, preparation: s.preparation, diagnostics: s.diagnostics}
 }
 func (s *playSession) applyOutput(copy *playSession) {
-	for _, key := range []string{"paths", "audioTracks", "subtitleTracks", "selectedAudioTrackId", "preparation", "live"} {
+	// Output refresh changes evidence on existing paths. Keep those maps in
+	// place: command code and plan readers may retain a path reference across
+	// refreshes, and must see the newly accepted evidence on that same path.
+	if paths, ok := copy.plan["paths"].([]object); ok {
+		current, _ := s.plan["paths"].([]object)
+		samePaths := len(current) == len(paths)
+		if samePaths {
+			for n := range paths {
+				if current[n]["id"] != paths[n]["id"] {
+					samePaths = false
+					break
+				}
+			}
+		}
+		if samePaths {
+			for n, path := range paths {
+				clear(current[n])
+				for key, value := range path {
+					current[n][key] = value
+				}
+			}
+		} else {
+			s.plan["paths"] = paths
+		}
+	}
+	for _, key := range []string{"audioTracks", "subtitleTracks", "selectedAudioTrackId", "preparation", "live"} {
 		if value, ok := copy.plan[key]; ok {
 			s.plan[key] = value
 		}
