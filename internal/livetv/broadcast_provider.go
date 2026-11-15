@@ -28,6 +28,8 @@ type providerBroadcastPlanner struct {
 	runner                transcode.ContinuousRunner
 	mu                    sync.Mutex
 	lastAired             map[string]time.Duration
+	firstAired            bool
+	startupFailures       []TuneInputFailure
 
 	ladder     *steadyLadder
 	link       *steadyLink // granted input of the current source, reused by same-source reopens
@@ -210,13 +212,16 @@ func (p *providerBroadcastPlanner) failed(err error) time.Time {
 	}
 	aired := a.decoder.delivered()
 	changed := errors.Is(err, transcode.ErrInputChanged)
+	if !p.firstAired && !changed {
+		p.noteStartupFailure(a.src.ID, err)
+	}
 	// A transport-stream tap already reconnected its URL itself before its
 	// readers saw the end, so the ladder skips straight to the next source.
 	tapped := a.link.format == "mpegts"
-	failover := false
+	failover := !p.firstAired && !changed
 	if h, ok := p.s.inputHealth(a.link.ss); ok {
 		tapped = h.Kind == "ts"
-		failover = h.Failed
+		failover = failover || h.Failed
 	}
 	failover = failover || tapped && steadyFailover(err) || errors.Is(err, errSteadyChangeStorm)
 	at := p.ladder.failed(a.src.ID, err, aired, failover, sourceIDs(candidates), now)
@@ -362,6 +367,11 @@ func (p *providerBroadcastPlanner) open(ctx context.Context) (transcode.Decoder,
 }
 
 func (p *providerBroadcastPlanner) syncFailure(src StreamSource, err error, now time.Time) {
+	p.mu.Lock()
+	if !p.firstAired {
+		p.noteStartupFailure(src.ID, err)
+	}
+	p.mu.Unlock()
 	p.s.recordSourceHealth(p.channel.ID, src, err, false)
 	candidates := sourceIDs(p.s.orderedSourceCandidates(p.channel))
 	p.mu.Lock()
@@ -374,10 +384,13 @@ func (p *providerBroadcastPlanner) firstFrameDeadline(id string, backup bool) ti
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch {
+	case !p.firstAired:
+		if backup {
+			return 2 * time.Second
+		}
+		return 4 * time.Second
 	case !backup:
 		return steadyFirstFrameAlone
-	case len(p.lastAired) == 0:
-		return steadyFirstFrameCold
 	case id == p.ladder.source:
 		return steadyFirstFrameRejoin
 	}
@@ -576,10 +589,13 @@ func (d *providerBroadcastDecoder) next(ctx context.Context) (transcode.RawFrame
 }
 
 func (d *providerBroadcastDecoder) Aired(frame transcode.RawFrame) {
+	d.planner.mu.Lock()
+	d.planner.firstAired = true
+	d.planner.startupFailures = nil
 	if !frame.SourcePTSValid {
+		d.planner.mu.Unlock()
 		return
 	}
-	d.planner.mu.Lock()
 	if d.planner.lastAired == nil {
 		d.planner.lastAired = map[string]time.Duration{}
 	}
@@ -680,4 +696,52 @@ func (p *providerBroadcastPlanner) closePlanner() {
 	standby.close(p.s)
 	primed.close(p.s)
 	link.close(p.s)
+}
+
+// A reconnecting screen is useful after playback starts, but cannot make a
+// cold tune successful. Only an actual provider picture satisfies readiness.
+func (p *providerBroadcastPlanner) awaitFirstPicture(ctx context.Context) error {
+	candidates := len(p.s.orderedSourceCandidates(p.channel))
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		p.mu.Lock()
+		ready := p.firstAired
+		failures := append([]TuneInputFailure(nil), p.startupFailures...)
+		p.mu.Unlock()
+		if ready {
+			return nil
+		}
+		if ctx.Err() != nil || candidates > 0 && len(failures) >= candidates {
+			reason := ctx.Err()
+			if reason == nil {
+				reason = core.ErrNotAvailable
+			}
+			detail := *Diagnose("first_picture", reason)
+			if len(failures) > 0 && !errors.Is(reason, context.Canceled) {
+				last := failures[len(failures)-1]
+				detail.Code, detail.Stage, detail.UpstreamStatus = last.Code, last.Stage, last.UpstreamStatus
+			}
+			detail.Inputs = failures
+			return &detail
+		}
+		select {
+		case <-ctx.Done():
+		case <-tick.C:
+		}
+	}
+}
+
+// Caller holds mu. Retain one safe reason per input, only before any media airs.
+func (p *providerBroadcastPlanner) noteStartupFailure(id string, err error) {
+	failure := inputFailure(id, err)
+	for i := range p.startupFailures {
+		if p.startupFailures[i].Input == id {
+			p.startupFailures[i] = failure
+			return
+		}
+	}
+	if len(p.startupFailures) < MaxChannelInputs+1 {
+		p.startupFailures = append(p.startupFailures, failure)
+	}
 }

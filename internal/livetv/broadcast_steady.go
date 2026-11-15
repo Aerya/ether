@@ -274,56 +274,58 @@ type steadyAdmission struct {
 // the output's first decoder then reuses, so the decoder starts from the
 // bytes the probe already read on the same provider connection. It returns
 // a refusal reason when the tune must take a direct path.
-func (s *Service) admitSteady(ctx context.Context, c Channel) (*steadyAdmission, string, string) {
+func (s *Service) admitSteady(ctx context.Context, c Channel) (*steadyAdmission, string, string, error) {
 	if _, ok := s.transcoder().(continuousBudget); !ok {
-		return nil, steadyRefusedNoTranscoder, "transcoder runs no continuous outputs"
+		return nil, steadyRefusedNoTranscoder, "transcoder runs no continuous outputs", nil
 	}
 	if s.broadcasts.steadyStrained() {
-		return nil, steadyRefusedStrain, "running channels are falling behind real time"
+		return nil, steadyRefusedStrain, "running channels are falling behind real time", nil
 	}
 	rockSolid := s.stabilityPreset(c) == stabilityRockSolid
 	// Refuse before touching the provider when not even the smallest
 	// broadcast shape would fit.
 	smallest := transcode.RawFormat{Width: 1024, Height: 576, FPSNum: 25, FPSDen: 1}
 	if ok, load, budget := s.steadyCapacity(smallest); !ok && !rockSolid {
-		return nil, steadyRefusedCapacity, "encode capacity in use (" + formatCores(load) + " of " + formatCores(budget) + " cores)"
+		return nil, steadyRefusedCapacity, "encode capacity in use (" + formatCores(load) + " of " + formatCores(budget) + " cores)", nil
 	}
-	// Keep time for encoder startup and the reconnecting screen even when
-	// every candidate probe stalls. Per-input limits alone exhaust the tune.
-	probeCtx, stopProbes := context.WithTimeout(ctx, 3*time.Second)
+	// Divide a bounded input budget among candidates, leaving time for the
+	// first real picture. A cold tune never succeeds on a reconnecting screen.
+	probeCtx, stopProbes := context.WithTimeout(ctx, 6*time.Second)
 	defer stopProbes()
 	var probed *steadyAdmission
+	var failures []TuneInputFailure
+	var last error = core.ErrNotAvailable
 	silent := false
 	candidates := s.orderedSourceCandidates(c)
 	for i, src := range candidates {
 		if probeCtx.Err() != nil {
 			break
 		}
-		link, err := s.linkSteadySource(probeCtx, c, src, "broadcast-"+c.ID, steadyStartLead)
-		if errors.Is(err, ErrProviderBusy) || errors.Is(err, ErrProviderPaced) {
-			continue
-		}
+		deadline, _ := probeCtx.Deadline()
+		attempt, cancel := context.WithTimeout(probeCtx, time.Until(deadline)/time.Duration(len(candidates)-i))
+		link, err := s.linkSteadySource(attempt, c, src, "broadcast-"+c.ID, steadyStartLead)
 		if err != nil {
-			s.recordSourceHealth(c.ID, src, err, false)
+			cancel()
+			last = err
+			failures = append(failures, inputFailure(src.ID, err))
+			if !errors.Is(err, ErrProviderBusy) && !errors.Is(err, ErrProviderPaced) {
+				s.recordSourceHealth(c.ID, src, err, false)
+			}
 			continue
 		}
-		// A hanging input leaves the tune's budget for the next one.
-		probeBudget := 6 * time.Second
-		if i < len(candidates)-1 {
-			probeBudget = 3 * time.Second
-		}
-		attempt, cancel := context.WithTimeout(probeCtx, probeBudget)
 		info, err := s.probeSteadyLink(attempt, c, link)
 		cancel()
 		if err == nil && info != nil && info.Video() == nil && len(info.Streams) > 0 {
 			// Radio: Steady renders pictures; an audio-only source plays direct.
 			link.close(s)
-			return nil, steadyRefusedAudioOnly, "audio-only source plays direct"
+			return nil, steadyRefusedAudioOnly, "audio-only source plays direct", nil
 		}
 		if err != nil || info == nil || info.Video() == nil {
 			if err == nil {
 				err = core.ErrNotAvailable
 			}
+			last = err
+			failures = append(failures, inputFailure(src.ID, err))
 			s.recordSourceHealth(c.ID, src, err, false)
 			link.close(s)
 			continue
@@ -339,16 +341,19 @@ func (s *Service) admitSteady(ctx context.Context, c Channel) (*steadyAdmission,
 		break
 	}
 	if probed == nil && silent {
-		return nil, steadyRefusedVideoOnly, "all playable candidates lack audio; trying direct fallback"
+		return nil, steadyRefusedVideoOnly, "all playable candidates lack audio; trying direct fallback", nil
 	}
 	if probed == nil {
-		// Nothing answered within the tune: Steady still starts on its
-		// reconnecting screen and its ladder keeps trying every input.
-		probed = &steadyAdmission{shape: steadyShapeFor(nil)}
+		if probeCtx.Err() != nil && len(failures) == 0 {
+			last = probeCtx.Err()
+		}
+		detail := *Diagnose("source_start", last)
+		detail.Inputs = failures
+		return nil, "", "", &detail
 	}
 	if code, detail := steadyRefusal(probed.info); code != "" {
 		probed.link.close(s)
-		return nil, code, detail
+		return nil, code, detail, nil
 	}
 	src := StreamSource{}
 	if probed.link != nil {
@@ -360,9 +365,9 @@ func (s *Service) admitSteady(ctx context.Context, c Channel) (*steadyAdmission,
 	probed.class = class
 	if code != "" {
 		probed.link.close(s)
-		return nil, code, detail
+		return nil, code, detail, nil
 	}
-	return probed, "", ""
+	return probed, "", "", nil
 }
 
 func formatCores(v float64) string {
@@ -383,6 +388,11 @@ func (s *Service) probeSteadyLink(ctx context.Context, c Channel, link *steadyLi
 		return nil, err
 	}
 	defer s.revokeInput(probe)
+	// Read through the shared tap first: ffprobe sees only the loopback HTTP
+	// status and would otherwise hide the provider’s actual refusal.
+	if _, _, err := s.sniffInput(ctx, probe, 1); err != nil {
+		return nil, err
+	}
 	return s.probeSessionInput(ctx, probe)
 }
 

@@ -236,7 +236,7 @@ func (s *Service) TuneWithSession(ctx context.Context, u *core.User, channelID s
 			if detail.Code == "cancelled" {
 				log.Debug("live tune cancelled", attrs...)
 			} else {
-				log.Warn("live tune failed", attrs...)
+				log.Info("live tune failed", attrs...)
 			}
 		} else {
 			log.Info("live tune ready", append(attrs, "source", result.Channel.SourceID, "analyzed", result.MediaInfo != nil)...)
@@ -376,7 +376,7 @@ func (s *Service) TuneWithSession(ctx context.Context, u *core.User, channelID s
 	// source must not occupy a viewer slot for three HTTP timeouts.
 	var cancel context.CancelFunc
 	if c.Kind == "iptv" {
-		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, 8*time.Second)
 	} else {
 		ctx, cancel = context.WithCancel(ctx)
 	}

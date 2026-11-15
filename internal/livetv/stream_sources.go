@@ -354,7 +354,7 @@ func liveInputHasAudio(info *core.MediaInfo) bool {
 }
 
 // startIPTV selects one input per viewing session, under the caller's existing
-// ten-second startup deadline. It never substitutes another provider's bytes,
+// shared startup deadline. It never substitutes another provider's bytes,
 // keys or media sequence into the active HLS resource map.
 func (s *Service) startIPTV(ctx context.Context, ss *session) error {
 	c := ss.info.Channel
@@ -378,6 +378,7 @@ func (s *Service) startIPTV(ctx context.Context, ss *session) error {
 		candidates = append(candidates, src)
 	}
 	var last error = core.ErrNotAvailable
+	var failures []TuneInputFailure
 	if len(candidates) == 0 && !earliestRetry.IsZero() {
 		return &TuneError{Code: "source_cooldown", Stage: "source_selection", RetryAfter: earliestRetry.Sub(s.o.Now()), cause: core.ErrNotAvailable}
 	}
@@ -393,14 +394,19 @@ func (s *Service) startIPTV(ctx context.Context, ss *session) error {
 		attemptCtx := ctx
 		cancel := func() {}
 		if len(candidates) > 1 {
-			// Leave a stalled primary only half the total tune budget, so a
-			// backup can still be tried. Fast failures advance immediately.
-			attemptCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+			// Share the remaining budget among untried inputs. Fast failures
+			// leave their unused time for the next candidate.
+			budget := 8 * time.Second
+			if deadline, ok := ctx.Deadline(); ok {
+				budget = time.Until(deadline)
+			}
+			attemptCtx, cancel = context.WithTimeout(ctx, budget/time.Duration(len(candidates)-index))
 		}
 		resolvedURL, headers, err := s.ResolveStreamSource(attemptCtx, c, src)
 		if err != nil {
 			cancel()
 			last = Diagnose("source_resolve", err)
+			failures = append(failures, inputFailure(src.ID, last))
 			log.Warn("live source resolve failed", append(Diagnose("source_resolve", err).LogAttrs(), "elapsed", time.Since(started))...)
 			if !errors.Is(ctx.Err(), context.Canceled) {
 				s.recordSourceHealth(c.ID, src, err, false)
@@ -436,6 +442,7 @@ func (s *Service) startIPTV(ctx context.Context, ss *session) error {
 			continue
 		}
 		last = Diagnose("source_start", err)
+		failures = append(failures, inputFailure(src.ID, last))
 		if !errors.Is(ctx.Err(), context.Canceled) {
 			s.recordSourceHealth(c.ID, src, err, false)
 		}
@@ -447,7 +454,9 @@ func (s *Service) startIPTV(ctx context.Context, ss *session) error {
 			log.Warn("live source attempt failed", attrs...)
 		}
 	}
-	return last
+	detail := *Diagnose("source_start", last)
+	detail.Inputs = failures
+	return &detail
 }
 
 func (s *Service) channelSourceEnabled(ctx context.Context, id string) bool {

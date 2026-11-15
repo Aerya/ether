@@ -16,7 +16,7 @@ import (
 )
 
 // awaitBroadcastCushion prefers three target durations for virtual
-// channels and two target durations for providers. Only tune waits, with a
+// channels and one target duration for providers. Only tune waits, with a
 // bounded budget; the first playlist never waits for this cushion.
 func awaitBroadcastCushion(ctx context.Context, lease *broadcastLease, provider bool) {
 	index, err := lease.output()
@@ -24,8 +24,8 @@ func awaitBroadcastCushion(ctx context.Context, lease *broadcastLease, provider 
 		return
 	}
 	segment := broadcastSegment(lease)
-	limit := 6 * time.Second
-	targets := 2
+	limit := 3 * time.Second
+	targets := 1
 	if !provider {
 		// Prefer AVPlayer's three-target startup buffer at tune time.
 		// Playlist handlers never wait for this cushion.
@@ -46,11 +46,8 @@ func awaitBroadcastCushion(ctx context.Context, lease *broadcastLease, provider 
 			return
 		}
 	}
-	// A live output's client starts two segments behind its first picture.
-	// AVPlayer reloads a changed playlist once per target duration, so its
-	// buffer then never drops below about one segment, and a segment
-	// published up to a second late costs nothing; no opening cut of the
-	// ladder is longer than that lead (continuousLadder).
+	// Return the first playable provider segment immediately. The frame clock
+	// continues building the cushion while the client fetches its playlist.
 	first := index.Since(-1, 1)
 	for len(first) > 0 && latest.Start.Add(latest.Duration).Sub(first[0].Start) < segment*time.Duration(targets) {
 		if latest, err = index.Wait(wait, latest.Seq); err != nil {
