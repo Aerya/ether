@@ -402,19 +402,17 @@ func (s *Server) handleSubtitleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	if !q.Has("language") {
-		writeHTTPError(w, http.StatusBadRequest)
-		return
-	}
 	lang := q.Get("language")
-	primary := strings.Split(lang, "-")[0]
-	tag, err := language.Parse(lang)
-	base, confidence := tag.Base()
-	if len(primary) != 2 || err != nil || confidence == language.No || base.String() == "und" {
-		writeHTTPError(w, http.StatusInternalServerError)
-		return
+	if lang != "" {
+		primary := strings.Split(lang, "-")[0]
+		tag, err := language.Parse(lang)
+		base, confidence := tag.Base()
+		if len(primary) != 2 || err != nil || confidence == language.No || base.String() == "und" {
+			writeHTTPError(w, http.StatusInternalServerError)
+			return
+		}
+		lang = frontend.NormalizeLanguage(lang)
 	}
-	lang = frontend.NormalizeLanguage(lang)
 	mc := libraryContainer()
 	if s.svc().subtitles == nil {
 		s.write(w, r, mc)
