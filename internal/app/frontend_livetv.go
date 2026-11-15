@@ -344,6 +344,12 @@ func (s surfaceLiveTV) GuideChannelLogo(ctx context.Context, c frontend.LiveTVCh
 	}
 	return ""
 }
+func (s surfaceLiveTV) SourceHubGroups(ctx context.Context) ([]frontend.LiveSourceHubGroup, error) {
+	if h, ok := s.host().(frontend.LiveTVSourceHubGroups); ok {
+		return h.SourceHubGroups(ctx)
+	}
+	return nil, nil
+}
 func (s surfaceLiveTV) TuneWithSession(ctx context.Context, u *frontend.User, id string, caps frontend.ClientCaps, sessionID string) (frontend.LiveTVSessionInfo, error) {
 	h := s.host()
 	if h == nil {
