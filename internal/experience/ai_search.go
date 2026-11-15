@@ -25,6 +25,18 @@ func (s *Service) AISearch(ctx context.Context, v *core.Viewer, d core.Device, q
 	return s.describeSearch(ctx, v, d, query, q, true)
 }
 
+// AISearchProgress observes candidates from the existing shared job. Reuse the
+// normal projection so partial pages obey the same current viewer policy.
+func (s *Service) AISearchProgress(ctx context.Context, v *core.Viewer, d core.Device, query string, q frontend.ItemQuery, publish func(frontend.SearchPage)) (frontend.SearchPage, error) {
+	observer := core.WithDescribeProgress(ctx, func(_ *core.CollectionSpec, _ []core.Title) {
+		page, err := s.describeSearch(ctx, v, d, query, q, false)
+		if err == nil && page.Descriptive != nil && page.Descriptive.State == frontend.DescriptivePartial {
+			publish(page)
+		}
+	})
+	return s.AISearch(observer, v, d, query, q)
+}
+
 // AISearchVisible uses the grid's batched local authorization path. A job's
 // cached wire cards must not trigger fifty Item detail enrichments on a poll.
 func (s *Service) AISearchVisible(ctx context.Context, v *core.Viewer, keys []core.RatingKey) ([]core.Title, error) {

@@ -86,6 +86,10 @@ func (m draftReplyModel) StreamTools(ctx context.Context, req llm.ToolRequest) (
 }
 func setDescribeModel(t *testing.T, db *sql.DB, cat *catalog.Catalog, svc *collections.Service, chat collections.Chatter) {
 	t.Helper()
+	setDescribeAgentModel(t, db, cat, svc, draftReplyModel{chat}, nil)
+}
+func setDescribeAgentModel(t *testing.T, db *sql.DB, cat *catalog.Catalog, svc *collections.Service, model agent.Model, logger *slog.Logger) {
+	t.Helper()
 	catalogue := tools.NewCatalogue()
 	if err := catalogue.Register(builtin.All(builtin.Deps{
 		Catalog: cat, Collections: svc,
@@ -99,7 +103,7 @@ func setDescribeModel(t *testing.T, db *sql.DB, cat *catalog.Catalog, svc *colle
 	})...); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetDescribeAgent(agent.New(agent.Options{Model: draftReplyModel{chat}, Catalogue: catalogue, Store: agent.NewStore(db)}))
+	svc.SetDescribeAgent(agent.New(agent.Options{Model: model, Catalogue: catalogue, Store: agent.NewStore(db), Logger: logger}))
 }
 
 func TestDescriptiveSearch(t *testing.T) {
@@ -300,4 +304,117 @@ func TestDescriptiveRelevance(t *testing.T) {
 	specJSON, _ := json.Marshal(got.Spec)
 	t.Logf("fake reply spec: %s", specJSON)
 	t.Logf("cold=%s cached=%s stages=%s", cold, warm, logs.String())
+}
+
+// This fake pauses between drafts so partial publication is observed before
+// completion, rather than inferred from a completed cached result.
+type progressiveDescribeModel struct {
+	step     int
+	refining chan struct{}
+	resume   chan struct{}
+}
+
+func (*progressiveDescribeModel) Enabled() bool                  { return true }
+func (*progressiveDescribeModel) ProviderID() string             { return "fake" }
+func (*progressiveDescribeModel) ModelName() string              { return "progressive-describe" }
+func (*progressiveDescribeModel) ToolsSupported() (bool, string) { return true, "" }
+func (m *progressiveDescribeModel) StreamTools(ctx context.Context, _ llm.ToolRequest) (<-chan llm.Event, error) {
+	m.step++
+	if m.step == 2 {
+		close(m.refining)
+		select {
+		case <-m.resume:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	out := make(chan llm.Event, 2)
+	if m.step <= 2 {
+		genre := "Romance"
+		if m.step == 2 {
+			genre = "Comedy"
+		}
+		raw := `{"spec":{"name":"` + genre + ` picks","mediaType":"movie","sources":[{"kind":"catalog"}],"rules":[{"field":"genre","op":"in","value":["` + genre + `"]}],"sort":"popularity","limit":200}}`
+		out <- llm.Event{Kind: llm.EventToolCall, ToolCallID: genre, ToolName: "collection_draft", Input: json.RawMessage(raw)}
+	} else {
+		out <- llm.Event{Kind: llm.EventTextDelta, Text: "Here are the picks."}
+	}
+	close(out)
+	return out, nil
+}
+func TestDescriptivePartialPublication(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db, err := store.OpenMemory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cat, err := catalog.New(db, nil, config.Catalog{Language: "en-US", Region: "US"}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for idx, genre := range []string{"Romance", "Comedy"} {
+		title := core.Title{Key: core.MovieKey(int64(idx + 1)), IDs: core.IDs{TMDB: int64(idx + 1)}, Type: core.TypeMovie, Title: genre, Genres: []string{genre}, ContentRating: "PG", Year: 2000, Released: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), Popularity: 100}
+		if err := cat.UpsertTitle(ctx, title, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	svc, err := collections.New(db, cat, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := &progressiveDescribeModel{refining: make(chan struct{}), resume: make(chan struct{})}
+	defer func() {
+		select {
+		case <-model.resume:
+		default:
+			close(model.resume)
+		}
+	}()
+	setDescribeAgentModel(t, db, cat, svc, model, logger)
+	started := time.Now()
+	if _, err := svc.DescribeSearch(ctx, nil, "cozy night in", false); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-model.refining:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	// A waiting protocol job must also see progress when a nonwaiting
+	// descriptive request started the shared job first.
+	observed := make(chan struct{})
+	completed := make(chan core.DescriptiveResult, 1)
+	go func() {
+		observedCtx := core.WithDescribeProgress(ctx, func(_ *core.CollectionSpec, _ []core.Title) { close(observed) })
+		final, _ := svc.DescribeSearch(observedCtx, nil, "cozy night in", true)
+		completed <- final
+	}()
+	select {
+	case <-observed:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	partial, err := svc.DescribeSearch(ctx, nil, " COZY night IN ", false)
+	first := time.Since(started)
+	if err != nil || partial.State != "partial" || len(partial.Items) != 1 || partial.Items[0].Title != "Romance" || partial.RetryAfterSeconds != 2 {
+		t.Fatalf("first draft not visible: %+v %v", partial, err)
+	}
+	// Reads return copies; a client must not be able to mutate a shared job.
+	partial.Items[0].Title = "Changed"
+	partial.Spec.Name = "Changed"
+	close(model.resume)
+	var final core.DescriptiveResult
+	select {
+	case final = <-completed:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if err != nil || final.State != "ready" || len(final.Items) != 1 || final.Items[0].Title != "Comedy" || final.Spec.Name != "Comedy picks" {
+		t.Fatalf("final did not replace partial: %+v %v", final, err)
+	}
+	t.Logf("fake first=%s complete=%s stages=%s", first, time.Since(started), logs.String())
 }

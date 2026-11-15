@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/braedonsaunders/ether/internal/agent/tools"
@@ -68,6 +69,11 @@ const missingToolNote = "The model could not finish the requested step. Try agai
 
 // loop runs the bounded tool-calling loop for one turn.
 func (s *Service) loop(ctx context.Context, p tools.Principal, threadID, turnID string, tc TurnContext, extra []llm.StreamMessage, emit func(Chunk) error) (finish string, runErr error) {
+	started := time.Now()
+	iterations := 0
+	defer func() {
+		s.log.Debug("agent loop timings", "route", tc.Route, "iterations", iterations, "duration", time.Since(started))
+	}()
 	visible := s.catalogue.Visible(ctx, p)
 	defs := make([]llm.ToolDef, 0, len(visible))
 	byName := map[string]tools.Tool{}
@@ -155,10 +161,13 @@ func (s *Service) loop(ctx context.Context, p tools.Principal, threadID, turnID 
 			persist()
 			return "error", err
 		}
+		iterations++
+		modelStarted := time.Now()
 		ch, err := s.model.StreamTools(ctx, llm.ToolRequest{
 			System: system, Messages: messages, Tools: defs, Temperature: 0.3, ToolChoice: toolChoice,
 		})
 		if err != nil {
+			s.log.Debug("agent model step timings", "route", tc.Route, "step", step+1, "duration", time.Since(modelStarted), "tool_calls", 0)
 			persist()
 			_ = emit(chunkFinishStep())
 			return "error", err
@@ -208,6 +217,7 @@ func (s *Service) loop(ctx context.Context, p tools.Principal, threadID, turnID 
 				break
 			}
 		}
+		s.log.Debug("agent model step timings", "route", tc.Route, "step", step+1, "duration", time.Since(modelStarted), "tool_calls", len(calls))
 		if textID != "" {
 			_ = emit(chunkTextEnd(textID))
 		}
@@ -250,7 +260,37 @@ func (s *Service) loop(ctx context.Context, p tools.Principal, threadID, turnID 
 		assistantMsg := llm.StreamMessage{Role: "assistant", Content: text.String(), ToolCalls: calls}
 		messages = append(messages, assistantMsg)
 		var results []llm.ToolResult
-		for _, call := range calls {
+		// Only the isolated headless catalogue contains exclusively independent,
+		// read-only tools. Bound concurrency and replay transcript outputs in model
+		// order, while tool progress can publish candidates immediately.
+		type execution struct {
+			result llm.ToolResult
+			output part
+			chunks []Chunk
+		}
+		parallel := s.headlessDescribe && len(calls) > 1
+		executions := make([]execution, len(calls))
+		if parallel {
+			var wg sync.WaitGroup
+			// A fixed worker pool also bounds goroutine count for a large model batch.
+			next := make(chan int)
+			for worker := 0; worker < min(4, len(calls)); worker++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for idx := range next {
+						collect := func(c Chunk) error { executions[idx].chunks = append(executions[idx].chunks, c); return nil }
+						executions[idx].result, executions[idx].output = s.executeTool(ctx, p, threadID, turnID, byName, calls[idx], collect)
+					}
+				}()
+			}
+			for idx := range calls {
+				next <- idx
+			}
+			close(next)
+			wg.Wait()
+		}
+		for idx, call := range calls {
 			// Editor proposals carry the owner's current unsaved channel through
 			// approval replay, rather than rebuilding from the saved channel.
 			if tc.Route == "/livetv/channel-builder" && call.Name == "livetv_channel_apply" {
@@ -268,7 +308,18 @@ func (s *Service) loop(ctx context.Context, p tools.Principal, threadID, turnID 
 					call.Input = json.RawMessage(mustJSON(input))
 				}
 			}
-			res, outPart := s.executeTool(ctx, p, threadID, turnID, byName, call, emit)
+			var res llm.ToolResult
+			var outPart part
+			if parallel {
+				res, outPart = executions[idx].result, executions[idx].output
+				for _, c := range executions[idx].chunks {
+					if err := emit(c); err != nil {
+						return "error", err
+					}
+				}
+			} else {
+				res, outPart = s.executeTool(ctx, p, threadID, turnID, byName, call, emit)
+			}
 			parts = append(parts, outPart)
 			// Approval / secret parts are appended right after their tool part.
 			if extra, ok := outPart["__extraPart"]; ok {
@@ -294,6 +345,9 @@ func (s *Service) loop(ctx context.Context, p tools.Principal, threadID, turnID 
 			return "error", err
 		}
 		if tokensUsed > budget {
+			if s.headlessDescribe {
+				return "tool-calls", nil
+			}
 			if pendingRepair != "" {
 				stopNote(missingToolNote)
 				return "error", errMissingToolCall
@@ -301,6 +355,9 @@ func (s *Service) loop(ctx context.Context, p tools.Principal, threadID, turnID 
 			stopNote("I stopped because this turn used its token budget. Ask me to continue, or narrow the request.")
 			return "other", nil
 		}
+	}
+	if s.headlessDescribe {
+		return "tool-calls", nil
 	}
 	if pendingRepair != "" {
 		stopNote(missingToolNote)
@@ -314,6 +371,10 @@ func (s *Service) loop(ctx context.Context, p tools.Principal, threadID, turnID 
 // the model-facing result and the stored UI part. A proposal or secret
 // request adds an extra part under the "__extraPart" key (stripped by caller).
 func (s *Service) executeTool(ctx context.Context, p tools.Principal, threadID, turnID string, byName map[string]tools.Tool, call llm.ToolCall, emit func(Chunk) error) (llm.ToolResult, part) {
+	started := time.Now()
+	defer func() {
+		s.log.Debug("agent tool timings", "tool", call.Name, "call_id", call.ID, "duration", time.Since(started))
+	}()
 	toolPart := part{
 		"type": "tool-" + call.Name, "toolCallId": call.ID, "state": "input-available",
 	}

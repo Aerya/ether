@@ -42,16 +42,20 @@ func (s *Service) collectionDraftAgent() CollectionDraftAgent {
 }
 
 type describeDraft struct {
-	done chan struct{}
-	spec *core.CollectionSpec
-	err  error
-	at   time.Time
+	done         chan struct{}
+	listeners    []func(*core.CollectionSpec, []core.Title)
+	partialSpec  *core.CollectionSpec
+	partialItems []core.Title
+	spec         *core.CollectionSpec
+	err          error
+	at           time.Time
 }
 type describeJob struct {
-	done   chan struct{}
-	result core.DescriptiveResult
-	err    error
-	at     time.Time
+	partial chan struct{}
+	done    chan struct{}
+	result  core.DescriptiveResult
+	err     error
+	at      time.Time
 }
 
 func (s *Service) DescriptiveSearchAvailable() bool {
@@ -111,7 +115,7 @@ func (s *Service) DescribeSearch(ctx context.Context, user *core.User, query str
 				}
 			}
 		}
-		job = &describeJob{done: make(chan struct{}), at: s.now()}
+		job = &describeJob{done: make(chan struct{}), partial: make(chan struct{}), at: s.now()}
 		s.describeJobs[key] = job
 		s.describeActive++
 		var viewer *core.User
@@ -122,34 +126,46 @@ func (s *Service) DescribeSearch(ctx context.Context, user *core.User, query str
 		go s.runDescribe(context.WithoutCancel(ctx), viewer, normalized, query, job)
 	}
 	s.describeMu.Unlock()
-	if !wait {
+	if wait {
 		select {
+		case <-ctx.Done():
+			return core.DescriptiveResult{}, ctx.Err()
 		case <-job.done:
-		default:
-			return core.DescriptiveResult{State: "pending", RetryAfterSeconds: 2}, nil
+		case <-job.partial:
+			s.describeMu.Lock()
+			provisional := job.result
+			s.describeMu.Unlock()
+			if provisional.State == "partial" {
+				core.PublishDescribeProgress(ctx, provisional.Spec, provisional.Items)
+			}
+			select {
+			case <-ctx.Done():
+				return core.DescriptiveResult{}, ctx.Err()
+			case <-job.done:
+			}
 		}
 	}
-	select {
-	case <-ctx.Done():
-		return core.DescriptiveResult{}, ctx.Err()
-	case <-job.done:
-		result := job.result
-		if result.State == "failed" {
-			result.RetryAfterSeconds = max(1, int(math.Ceil((time.Minute - s.now().Sub(job.at)).Seconds())))
-		}
-		result.Items = slices.Clone(result.Items)
-		result.Items = slices.DeleteFunc(result.Items, func(t core.Title) bool {
-			return t.Adult || (user != nil && contentrating.Exceeds(t.ContentRating, user.MaxContentRating))
-		})
-		if result.Spec != nil {
-			sp := cloneSpec(*result.Spec)
-			result.Spec = &sp
-		}
-		return result, job.err
+	s.describeMu.Lock()
+	result, jobErr, at := job.result, job.err, job.at
+	s.describeMu.Unlock()
+	if result.State == "" {
+		result.State, result.RetryAfterSeconds = "pending", 2
 	}
+	if result.State == "failed" {
+		result.RetryAfterSeconds = max(1, int(math.Ceil((time.Minute - s.now().Sub(at)).Seconds())))
+	}
+	result.Items = slices.Clone(result.Items)
+	result.Items = slices.DeleteFunc(result.Items, func(t core.Title) bool {
+		return t.Adult || (user != nil && contentrating.Exceeds(t.ContentRating, user.MaxContentRating))
+	})
+	if result.Spec != nil {
+		sp := cloneSpec(*result.Spec)
+		result.Spec = &sp
+	}
+	return result, jobErr
 }
 
-func (s *Service) describeSpec(ctx context.Context, key, query string) (*core.CollectionSpec, error) {
+func (s *Service) describeSpec(ctx context.Context, key, query string, publish func(*core.CollectionSpec, []core.Title)) (*core.CollectionSpec, error) {
 	s.describeMu.Lock()
 	if s.describeDrafts == nil {
 		s.describeDrafts = map[string]*describeDraft{}
@@ -170,7 +186,18 @@ func (s *Service) describeSpec(ctx context.Context, key, query string) (*core.Co
 		}
 	}
 	if draft != nil {
+		select {
+		case <-draft.done:
+			s.describeMu.Unlock()
+			return draft.spec, draft.err
+		default:
+		}
+		draft.listeners = append(draft.listeners, publish)
+		partialSpec, partialItems := draft.partialSpec, draft.partialItems
 		s.describeMu.Unlock()
+		if len(partialItems) > 0 {
+			publish(partialSpec, partialItems)
+		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -190,14 +217,34 @@ func (s *Service) describeSpec(ctx context.Context, key, query string) (*core.Co
 			}
 		}
 	}
-	draft = &describeDraft{done: make(chan struct{}), at: s.now()}
+	draft = &describeDraft{done: make(chan struct{}), at: s.now(), listeners: []func(*core.CollectionSpec, []core.Title){publish}}
 	s.describeDrafts[key] = draft
 	s.describeMu.Unlock()
 	// Run exactly the console's Describe it agent, not the one-shot generator.
 	var spec *core.CollectionSpec
 	var err error
 	if agent := s.collectionDraftAgent(); agent != nil {
-		spec, err = agent.DescribeCollection(core.WithoutCatalogViewer(ctx), query)
+		progress := func(spec *core.CollectionSpec, items []core.Title) {
+			s.describeMu.Lock()
+			// Only retain the first useful candidates while the agent refines. The
+			// final draft always replaces these and runs normal taste ordering.
+			if len(draft.partialItems) > 0 {
+				s.describeMu.Unlock()
+				return
+			}
+			draft.partialItems = slices.Clone(items)
+			if spec != nil {
+				sp := cloneSpec(*spec)
+				draft.partialSpec = &sp
+			}
+			listeners := slices.Clone(draft.listeners)
+			partialSpec, partialItems := draft.partialSpec, draft.partialItems
+			s.describeMu.Unlock()
+			for _, listener := range listeners {
+				listener(partialSpec, partialItems)
+			}
+		}
+		spec, err = agent.DescribeCollection(core.WithDescribeProgress(core.WithoutCatalogViewer(ctx), progress), query)
 	} else {
 		err = ErrLLMDisabled
 	}
@@ -214,6 +261,8 @@ func (s *Service) describeSpec(ctx context.Context, key, query string) (*core.Co
 	}
 	s.describeMu.Lock()
 	draft.spec, draft.err, draft.at = spec, err, s.now()
+	draft.listeners = nil
+	draft.partialItems, draft.partialSpec = nil, nil
 	close(draft.done)
 	s.describeMu.Unlock()
 	return spec, err
@@ -225,7 +274,25 @@ func (s *Service) runDescribe(parent context.Context, user *core.User, key, quer
 	started := time.Now()
 	stage := "draft"
 	var draftDuration, candidateDuration, scoringDuration time.Duration
-	spec, err := s.describeSpec(ctx, key, query)
+	publish := func(spec *core.CollectionSpec, items []core.Title) {
+		if ctx.Err() != nil || len(items) == 0 {
+			return
+		}
+		result := core.DescriptiveResult{State: "partial", RetryAfterSeconds: 2, Items: slices.Clone(items)}
+		if spec != nil {
+			sp := cloneSpec(*spec)
+			result.Spec, result.Title = &sp, sp.Name
+		}
+		s.describeMu.Lock()
+		select {
+		case <-job.partial:
+		default:
+			close(job.partial)
+		}
+		job.result = result
+		s.describeMu.Unlock()
+	}
+	spec, err := s.describeSpec(ctx, key, query, publish)
 	draftDuration = time.Since(started)
 	result := core.DescriptiveResult{State: "failed"}
 	if err == nil {

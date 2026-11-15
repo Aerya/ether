@@ -3,7 +3,8 @@ package core
 import "context"
 
 // DescriptiveResult is an AI-generated collection search. Pending requests
-// have no invented results; clients that can poll retain their pending state.
+// have no invented results. Partial results are provisional; clients keep polling
+// and replace them with the final ready result.
 type DescriptiveResult struct {
 	Spec              *CollectionSpec
 	State             string
@@ -23,4 +24,19 @@ type DescriptiveSearcher interface {
 // library-sized in-memory collection or fetching external lists.
 type DescriptiveCatalog interface {
 	DescribeCandidates(context.Context, CollectionSpec, int) ([]Title, error)
+}
+
+// WithDescribeProgress observes bounded candidates from the existing Describe
+// tools. The callback must be safe for concurrent read-only tool executions.
+func WithDescribeProgress(ctx context.Context, publish func(*CollectionSpec, []Title)) context.Context {
+	return context.WithValue(ctx, describeProgressKey{}, publish)
+}
+
+type describeProgressKey struct{}
+
+// PublishDescribeProgress is a no-op outside an active headless search job.
+func PublishDescribeProgress(ctx context.Context, spec *CollectionSpec, items []Title) {
+	if publish, ok := ctx.Value(describeProgressKey{}).(func(*CollectionSpec, []Title)); ok && publish != nil && len(items) > 0 {
+		publish(spec, items)
+	}
 }

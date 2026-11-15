@@ -13,3 +13,9 @@ type AISearcher interface {
 	AISearchAvailable() bool
 	AISearch(context.Context, *Viewer, Device, string, ItemQuery) (SearchPage, error)
 }
+
+// ProgressiveAISearcher publishes provisional, viewer-filtered pages during
+// the same waiting AI job. Callers replace these with the returned final page.
+type ProgressiveAISearcher interface {
+	AISearchProgress(context.Context, *Viewer, Device, string, ItemQuery, func(SearchPage)) (SearchPage, error)
+}

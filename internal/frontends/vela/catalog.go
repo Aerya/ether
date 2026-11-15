@@ -656,7 +656,7 @@ func descriptiveWire(status *frontend.DescriptiveSearchStatus) object {
 		state = status.State
 	}
 	retry := object{"allowed": false}
-	if state == frontend.DescriptivePending || state == frontend.DescriptiveBusy || state == frontend.DescriptiveFailed {
+	if state == frontend.DescriptivePartial || state == frontend.DescriptivePending || state == frontend.DescriptiveBusy || state == frontend.DescriptiveFailed {
 		seconds := 2
 		if state == frontend.DescriptiveFailed {
 			seconds = 60
