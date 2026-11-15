@@ -30,7 +30,18 @@ type Frontend struct {
 }
 
 func (Frontend) Describe() frontend.Descriptor {
-	return frontend.Descriptor{ID: "vela", Name: "Vela", Version: "0", SettingsSchema: frontend.SettingsSchema{SignInHelp: true, Sections: []frontend.SettingsSection{{Key: "find", Fields: []frontend.SettingsField{{Key: "serverName", Kind: "serverName"}}}}}}
+	return frontend.Descriptor{ID: "vela", Name: "Vela", Version: "0", SettingsSchema: frontend.SettingsSchema{SignInHelp: true, Sections: []frontend.SettingsSection{{Key: "appearance", Fields: []frontend.SettingsField{{Key: "defaultSkinId", Kind: "string"}}}, {Key: "find", Fields: []frontend.SettingsField{{Key: "serverName", Kind: "serverName"}}}}}}
+}
+
+// ValidateSettings keeps the owner setting additive without accepting arbitrary config.
+func (Frontend) ValidateSettings(s frontend.Settings) error {
+	for key, value := range s {
+		id, ok := value.(string)
+		if key != "defaultSkinId" || !ok || !skinIDPattern.MatchString(id) {
+			return errors.New("invalid Vela setting")
+		}
+	}
+	return nil
 }
 func (f Frontend) Mount(ctx context.Context, host frontend.Host) (frontend.Instance, error) {
 	if host.Identity == nil || host.Experience == nil || host.Sessions == nil {
@@ -59,12 +70,14 @@ type replay struct {
 	expires time.Time
 }
 type instance struct {
-	bootstrapMu sync.Mutex
-	bootstraps  map[string]*bootstrapEntry
-	db          *sql.DB
-	seal        cipher.AEAD
-	rowMu       sync.Mutex
-	rowMeta     map[string]frontend.RowView
+	appearanceMu    sync.Mutex
+	appearanceCache *appearanceEntry
+	bootstrapMu     sync.Mutex
+	bootstraps      map[string]*bootstrapEntry
+	db              *sql.DB
+	seal            cipher.AEAD
+	rowMu           sync.Mutex
+	rowMeta         map[string]frontend.RowView
 
 	host         frontend.Host
 	ctx          context.Context
@@ -417,6 +430,8 @@ func (i *instance) route(method, path string, h http.HandlerFunc) {
 	i.mux.HandleFunc(method+" /vela/v0"+path, h)
 }
 func (i *instance) routes() {
+	i.route("GET", "/appearance", i.appearance)
+	i.route("GET", "/events", i.appearanceEvents)
 	i.route("GET", "/libraries", i.libraries)
 	i.route("GET", "/libraries/{id}/items", i.libraryItems)
 	i.route("GET", "/capabilities", func(w http.ResponseWriter, r *http.Request) { cache(w, r, i.requestCapabilities(r)) })
@@ -467,7 +482,7 @@ func (i *instance) capabilities() object {
 	if source, ok := i.host.Identity.(frontend.AuthenticationFeatureSource); ok {
 		auth = source.AuthenticationFeatures()
 	}
-	return object{"protocolVersion": 0, "compatibleClientBuilds": object{"minInclusive": "0.1.0", "maxExclusive": "0.2.0"}, "server": object{"id": s.MachineID, "name": s.FriendlyName, "version": s.Version}, "features": object{"passwordSignIn": f(auth.Password), "deviceGrant": f(auth.QuickConnect && i.host.ViewerPortalURL != nil), "quickConnect": f(auth.QuickConnect), "descriptiveSearch": f(descriptive), "aiSearch": f(i.aiSearchAvailable()), "proactiveFallback": f(i.proactiveFallbackAvailable()), "liveTV": f(live), "extras": f(false), "initialTrackSelection": f(true), "audioFallback": f(i.audioFallbackAvailable()), "sessionTrackChanges": f(trackChanges), "extraPlayback": f(i.extraPlaybackAvailable()), "trailerPreview": f(i.previewAvailable()), "themeMusic": f(i.themeAvailable())}, "skins": []object{{"id": "default", "name": "Vela"}}, "defaultSkinId": "default"}
+	return object{"protocolVersion": 0, "compatibleClientBuilds": object{"minInclusive": "0.1.0", "maxExclusive": "0.2.0"}, "server": object{"id": s.MachineID, "name": s.FriendlyName, "version": s.Version}, "features": object{"passwordSignIn": f(auth.Password), "deviceGrant": f(auth.QuickConnect && i.host.ViewerPortalURL != nil), "quickConnect": f(auth.QuickConnect), "descriptiveSearch": f(descriptive), "aiSearch": f(i.aiSearchAvailable()), "proactiveFallback": f(i.proactiveFallbackAvailable()), "liveTV": f(live), "extras": f(false), "initialTrackSelection": f(true), "audioFallback": f(i.audioFallbackAvailable()), "sessionTrackChanges": f(trackChanges), "extraPlayback": f(i.extraPlaybackAvailable()), "trailerPreview": f(i.previewAvailable()), "themeMusic": f(i.themeAvailable())}, "skins": []object{{"id": "cinematic", "name": "Cinematic"}}, "defaultSkinId": i.appearanceDocument().skinID}
 }
 func (i *instance) negotiate(w http.ResponseWriter, r *http.Request) {
 	var b struct {

@@ -77,7 +77,9 @@ type Config struct {
 
 // Frontend holds the enabled state of a protocol front end.
 type Frontend struct {
-	Enabled bool `json:"enabled"`
+	// AppearanceRevision survives restarts so Vela clients can reject stale looks.
+	AppearanceRevision uint64 `json:"appearanceRevision,omitempty"`
+	Enabled            bool   `json:"enabled"`
 	// PublicURL is the optional address viewers use to reach this one app
 	// from outside the home network (e.g. https://jelly.example.com), for
 	// owners who route each app through its own host name. Empty keeps the
