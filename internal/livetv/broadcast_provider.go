@@ -130,26 +130,16 @@ func (p *providerBroadcastPlanner) plans(now time.Time) (broadcastPlan, *broadca
 // rest of a reserve the decoder starts behind the live edge stays on the
 // server, where it hides upstream stalls.
 //
-// A live output publishes two-second segments. Without a provider backlog a
-// client can only start one segment behind the first picture, and every
-// later segment must be no longer than that lag or it stalls; two seconds
-// keeps a cold raw-TS tune under five seconds without a stall. The clock
-// never stops publishing, so the 3 s (1.5x target) client limit holds.
+// The owner profile sets the segment target and desired published lead.
+// A cold source without backlog builds that lead opportunistically; neither
+// the first playlist nor the frame clock waits for the full cushion.
 func (p *providerBroadcastPlanner) coldWait() time.Duration { return 4 * time.Second }
 func (p *providerBroadcastPlanner) startupLead() time.Duration {
-	// A playlist input joined steadyStartLead deeper than its reserve, so the
-	// burst spends that backlog, not the reserve. A transport stream's reserve
-	// is only what its provider sent on connect, which no deeper join can
-	// extend: it spends one segment of it, and without a backlog the cushion
-	// builds in real time while the tune waits for it.
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.primed != nil && p.primed.format == "mpegts" {
-		return steadySegment
-	}
-	return 2 * steadySegment
+	return p.s.latencyPolicy().TargetLatency()
 }
-func (p *providerBroadcastPlanner) segmentDuration() time.Duration { return steadySegment }
+func (p *providerBroadcastPlanner) segmentDuration() time.Duration {
+	return p.s.latencyPolicy().SegmentDuration()
+}
 
 const steadySegment = 2 * time.Second
 

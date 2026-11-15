@@ -416,6 +416,7 @@ type Options struct {
 	LogoHTTP           *http.Client // optional test transport for the logo index; nil uses the guarded client
 	LogoIndexURL       func() string
 	HealthSweepMinutes func() int    // 0 defaults to 15; negative disables
+	LatencyProfile     func() string // owner preference; nil means Automatic
 	Stability          func() string // server-wide stability preset; nil or "" is balanced (reserve_policy.go)
 	Now                func() time.Time
 	// Logger receives credential-safe import, playback and delivery diagnostics.

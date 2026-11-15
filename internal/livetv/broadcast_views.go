@@ -145,14 +145,14 @@ func (s *Service) broadcastWindow(ctx context.Context, ss *session, r *http.Requ
 		}
 	}
 	end := latest.Start.Add(latest.Duration)
-	from := end.Add(-24 * time.Second)
+	from := end.Add(-s.latencyPolicy().PlaylistWindow())
 	if raw := r.URL.Query().Get("offset"); raw != "" {
 		seconds, err := strconv.ParseFloat(raw, 64)
 		if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 0 || seconds > broadcastDVR.Seconds() {
 			return nil, nil, fmt.Errorf("invalid DVR offset")
 		}
 		end = end.Add(-time.Duration(seconds * float64(time.Second)))
-		from = end.Add(-24 * time.Second)
+		from = end.Add(-s.latencyPolicy().PlaylistWindow())
 	}
 	ss.mu.Lock()
 	user := ss.user
@@ -192,6 +192,7 @@ func (s *Service) serveBroadcastPlaylist(w http.ResponseWriter, r *http.Request,
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:%d\n#EXT-X-MEDIA-SEQUENCE:%d\n", target, segments[0].Seq)
+	fmt.Fprintf(&b, "#EXT-X-START:TIME-OFFSET=-%.3f,PRECISE=NO\n", s.latencyPolicy().TargetLatencySeconds)
 	for _, seg := range segments {
 		uri := fmt.Sprintf("relay/%d.ts", seg.Seq)
 		if !strings.Contains(r.URL.Path, "/livetv/sessions/") {

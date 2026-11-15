@@ -53,8 +53,12 @@ type scheduleBroadcastPlanner struct {
 	mu           sync.Mutex
 }
 
-func (p *scheduleBroadcastPlanner) segmentDuration() time.Duration { return 2 * time.Second }
-func (p *scheduleBroadcastPlanner) startupLead() time.Duration     { return 3 * p.segmentDuration() }
+func (p *scheduleBroadcastPlanner) segmentDuration() time.Duration {
+	return p.s.latencyPolicy().SegmentDuration()
+}
+func (p *scheduleBroadcastPlanner) startupLead() time.Duration {
+	return p.s.latencyPolicy().TargetLatency()
+}
 
 func (p *scheduleBroadcastPlanner) noteHold(kind string, dur time.Duration) {
 	if p.s != nil {

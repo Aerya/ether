@@ -420,6 +420,7 @@ export interface EtherConfig {
     sourceOrder?: string[];
   };
   liveTV?: {
+    latencyProfile?: "auto" | "low" | "stable";
     logoIndexUrl?: string;
     healthSweepMinutes?: number;
     stability?: "fastest" | "balanced" | "rocksolid" | "";

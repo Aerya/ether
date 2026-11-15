@@ -303,7 +303,7 @@ func (s *Service) admitSteady(ctx context.Context, c Channel) (*steadyAdmission,
 		}
 		deadline, _ := probeCtx.Deadline()
 		attempt, cancel := context.WithTimeout(probeCtx, time.Until(deadline)/time.Duration(len(candidates)-i))
-		link, err := s.linkSteadySource(attempt, c, src, "broadcast-"+c.ID, steadyStartLead)
+		link, err := s.linkSteadySource(attempt, c, src, "broadcast-"+c.ID, s.latencyPolicy().TargetLatency()+s.latencyPolicy().SegmentDuration())
 		if err != nil {
 			cancel()
 			last = err
@@ -395,13 +395,6 @@ func (s *Service) probeSteadyLink(ctx context.Context, c Channel, link *steadyLi
 	}
 	return s.probeSessionInput(ctx, probe)
 }
-
-// steadyStartLead is how much deeper than the stability reserve the tune's
-// input joins: the startup burst (two segments) plus the decoded pictures the
-// clock's input buffer holds ahead of the output (three seconds), so the whole
-// reserve is still ahead once the output starts. A transport stream only
-// gains what its tap actually buffered.
-const steadyStartLead = 8 * time.Second
 
 // steadyInputFormat names the demuxer of a probed live input.
 func steadyInputFormat(info *core.MediaInfo) string {

@@ -45,6 +45,8 @@ type ownedTimeline struct {
 
 	mu          sync.Mutex
 	target      time.Duration // fixed at the first publication
+	windowSpan  time.Duration
+	startBehind time.Duration
 	targetFloor time.Duration
 	startSegs   int // segments the first playlist waits for
 	// startMedia, when set, also starts the first playlist once that much
@@ -438,7 +440,7 @@ func (t *ownedTimeline) appendLocked(seg *ownedSegment, at time.Time) {
 	t.lastAt, t.lastDur = at, seg.dur
 	keep := ownedMinWindow
 	if t.target > 0 {
-		keep = max(keep, int(math.Ceil(float64(ownedWindowSpan)/float64(t.target))))
+		keep = max(keep, int(math.Ceil(float64(t.playlistWindow())/float64(t.target))))
 	}
 	for len(t.window) > keep {
 		gone := t.window[0]
@@ -629,6 +631,9 @@ func (t *ownedTimeline) render(seg func(seq int64, ext string) string, res func(
 	b.WriteString("#EXTM3U\n")
 	fmt.Fprintf(&b, "#EXT-X-VERSION:%d\n", version)
 	fmt.Fprintf(&b, "#EXT-X-TARGETDURATION:%d\n", int(t.target/time.Second))
+	if t.startBehind > 0 {
+		fmt.Fprintf(&b, "#EXT-X-START:TIME-OFFSET=-%.3f,PRECISE=NO\n", max(t.startBehind, 3*t.target).Seconds())
+	}
 	first := t.nextSeq
 	if len(t.window) > 0 {
 		first = t.window[0].seq
@@ -667,4 +672,11 @@ func (t *ownedTimeline) render(seg func(seq int64, ext string) string, res func(
 		fmt.Fprintf(&b, "#EXTINF:%.3f,\n%s\n", s.dur.Seconds(), seg(s.seq, s.ext))
 	}
 	return b.Bytes()
+}
+
+func (t *ownedTimeline) playlistWindow() time.Duration {
+	if t.windowSpan > 0 {
+		return t.windowSpan
+	}
+	return ownedWindowSpan
 }
