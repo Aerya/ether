@@ -65,10 +65,12 @@ type BrokerDeps struct {
 	SourceHistory SourceHistoryWriter
 	ActiveViewer  func(context.Context, int64) (*core.Viewer, error)
 	CanPlay       func(*core.Viewer, bool, time.Time) bool
-	// FreshPlay re-reads fenced membership and safety policy. A returned viewer
+	// CurrentPlay rechecks a running item without imposing bedtime.
+	// FreshPlay re-reads fenced membership and safety policy for admission. A returned viewer
 	// replaces the cached one for the rest of the call. ErrPolicyUnconfirmed
 	// keeps the cached CanPlay decision for an unrestricted viewer.
-	FreshPlay func(context.Context, *core.Viewer, bool, time.Time) (*core.Viewer, error)
+	CurrentPlay func(context.Context, *core.Viewer, bool, time.Time) (*core.Viewer, error)
+	FreshPlay   func(context.Context, *core.Viewer, bool, time.Time) (*core.Viewer, error)
 	// ReceiptCurrent rechecks the acceptance Plex stored for this request.
 	ReceiptCurrent     func(context.Context, auth.Acceptance) error
 	BitrateLimit       func(*core.Viewer) int
@@ -280,6 +282,18 @@ func (b *Broker) permitted(v *core.Viewer, caps core.ClientCaps) bool {
 // confirm applies a fenced playback policy when one is installed. The returned
 // viewer is the one later lookups must use.
 func (b *Broker) confirm(ctx context.Context, v *core.Viewer, caps core.ClientCaps) (*core.Viewer, error) {
+	return b.confirmPolicy(ctx, v, caps, b.deps.FreshPlay)
+}
+
+// Current item checks deliberately exclude bedtime: an admitted item can finish.
+func (b *Broker) confirmCurrent(ctx context.Context, v *core.Viewer, caps core.ClientCaps) (*core.Viewer, error) {
+	fresh := b.deps.CurrentPlay
+	if fresh == nil {
+		fresh = b.deps.FreshPlay
+	}
+	return b.confirmPolicy(ctx, v, caps, fresh)
+}
+func (b *Broker) confirmPolicy(ctx context.Context, v *core.Viewer, caps core.ClientCaps, freshPlay func(context.Context, *core.Viewer, bool, time.Time) (*core.Viewer, error)) (*core.Viewer, error) {
 	if v == nil || v.ID <= 0 {
 		return nil, core.ErrUnauthorized
 	}
@@ -287,8 +301,8 @@ func (b *Broker) confirm(ctx context.Context, v *core.Viewer, caps core.ClientCa
 	if b.deps.Now != nil {
 		at = b.deps.Now()
 	}
-	if b.deps.FreshPlay != nil {
-		fresh, err := b.deps.FreshPlay(ctx, v, caps.Remote, at)
+	if freshPlay != nil {
+		fresh, err := freshPlay(ctx, v, caps.Remote, at)
 		if err == nil && fresh != nil && fresh.ID == v.ID {
 			return fresh, nil
 		}
@@ -1009,7 +1023,7 @@ func (b *Broker) accessSession(ctx context.Context, a frontend.SessionAccess, id
 		return nil, nil, core.ErrUnauthorized
 	}
 	if enforcePlaybackPolicy && !owner {
-		confirmed, err := b.confirm(ctx, viewer, s.caps)
+		confirmed, err := b.confirmCurrent(ctx, viewer, s.caps)
 		if err != nil {
 			return nil, nil, err
 		}

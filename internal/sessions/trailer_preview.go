@@ -199,7 +199,7 @@ func (b *Broker) servePreview(protocol frontend.Protocol, access *frontend.Sessi
 		deny()
 		return true
 	}
-	if viewer, err = b.confirm(r.Context(), viewer, s.caps); err != nil {
+	if viewer, err = b.confirmCurrent(r.Context(), viewer, s.caps); err != nil {
 		deny()
 		return true
 	}

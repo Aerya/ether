@@ -401,6 +401,7 @@ export function StreamRulesFields({
 // ---- Safety policy (/safety/policies/:user) ----------------------------------------
 
 export type SafetyPolicy = {
+  bedtime?: { time: string; wakeTime: string; timezone: string; days?: number[] } | null;
   blockedGenres: string[];
   blockedKeywords: string[];
   remoteDisabled: boolean;

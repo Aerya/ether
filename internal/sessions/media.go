@@ -400,7 +400,7 @@ func sessionResource(sessionID, resource string) bool {
 }
 
 func (b *Broker) currentMediaPolicy(ctx context.Context, viewer *core.Viewer, s *brokerSession) bool {
-	confirmed, err := b.confirm(ctx, viewer, s.caps)
+	confirmed, err := b.confirmCurrent(ctx, viewer, s.caps)
 	if err != nil || confirmed.ID != s.public.ViewerID {
 		return false
 	}

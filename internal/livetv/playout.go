@@ -247,6 +247,13 @@ func (s *Service) TuneWithSession(ctx context.Context, u *core.User, channelID s
 	if u == nil || (s.o.CanPlay != nil && !s.o.CanPlay(u, caps.Remote, s.o.Now())) {
 		return SessionInfo{}, core.ErrUnauthorized
 	}
+	if s.o.ConfirmAdmission != nil {
+		confirmed, err := s.o.ConfirmAdmission(ctx, u, caps.Remote, s.o.Now())
+		if err != nil {
+			return SessionInfo{}, err
+		}
+		u = confirmed
+	}
 	ctx, policy, err := s.withPolicy(ctx, u)
 	if err != nil {
 		return SessionInfo{}, err

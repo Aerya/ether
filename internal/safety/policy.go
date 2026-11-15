@@ -32,10 +32,11 @@ func init() {
 // record (core.User.StreamLimit, core.User.MaxContentRating), which every
 // protocol already reads.
 type Policy struct {
-	BlockedGenres   []string `json:"blockedGenres"`
-	BlockedKeywords []string `json:"blockedKeywords"`
-	RemoteDisabled  bool     `json:"remoteDisabled"`
-	MaxBitrateKbps  int      `json:"maxBitrateKbps"`
+	Bedtime         *core.Bedtime `json:"bedtime,omitempty"`
+	BlockedGenres   []string      `json:"blockedGenres"`
+	BlockedKeywords []string      `json:"blockedKeywords"`
+	RemoteDisabled  bool          `json:"remoteDisabled"`
+	MaxBitrateKbps  int           `json:"maxBitrateKbps"`
 	// AllowedHours is empty for any time, otherwise hours 0..23 in Timezone.
 	AllowedHours []int  `json:"allowedHours"`
 	Timezone     string `json:"timezone"`
@@ -135,6 +136,7 @@ func (s *Service) Get(id int64) Policy {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	p := s.policies[id]
+	p.Bedtime = cloneBedtime(p.Bedtime)
 	p.AllowedHours = append([]int(nil), p.AllowedHours...)
 	p.BlockedGenres = append([]string(nil), p.BlockedGenres...)
 	p.BlockedKeywords = append([]string(nil), p.BlockedKeywords...)
@@ -143,6 +145,9 @@ func (s *Service) Get(id int64) Policy {
 
 // Validate reports why p cannot be stored, if it cannot.
 func (p Policy) Validate() error {
+	if err := validateBedtime(p.Bedtime); err != nil {
+		return err
+	}
 	if p.MaxBitrateKbps < 0 {
 		return fmt.Errorf("invalid viewer or bitrate")
 	}
@@ -161,6 +166,7 @@ func (p Policy) Validate() error {
 
 func (s *Service) Put(ctx context.Context, id int64, p Policy) error {
 	// Cache an independent snapshot, just as Get returns one to callers.
+	p.Bedtime = cloneBedtime(p.Bedtime)
 	p.AllowedHours = append([]int(nil), p.AllowedHours...)
 	p.BlockedGenres = append([]string(nil), p.BlockedGenres...)
 	p.BlockedKeywords = append([]string(nil), p.BlockedKeywords...)
@@ -489,7 +495,7 @@ func (s *Service) Restricted(u *core.User) bool {
 	}
 	p := s.ForUser(u)
 	share := s.shareFor(u)
-	return u.MaxContentRating != "" || len(u.AllowedLibraries) > 0 || len(p.BlockedGenres) > 0 || len(p.BlockedKeywords) > 0 ||
+	return p.Bedtime != nil || u.MaxContentRating != "" || len(u.AllowedLibraries) > 0 || len(p.BlockedGenres) > 0 || len(p.BlockedKeywords) > 0 ||
 		share.FilterMovies != "" || share.FilterTelevision != ""
 }
 

@@ -62,6 +62,10 @@ const (
 )
 
 func playbackMessage(err error) string {
+	var bedtime *frontend.ErrBedtime
+	if errors.As(err, &bedtime) {
+		return bedtime.Error()
+	}
 	switch {
 	case errors.Is(err, frontend.ErrUnreleased):
 		return "This title has not been released yet. Playback is unavailable."
