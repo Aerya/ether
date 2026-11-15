@@ -74,6 +74,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	}
 	var b struct {
 		TitleID, ChannelID, ExtraID string
+		IdempotencyKey              string
 		LiveMode                    string
 		Client                      client
 		PositionSeconds             *float64
@@ -100,7 +101,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 			problem(w, 400, "request", "invalid_target")
 			return
 		}
-		i.unavailable(w, r)
+		i.extraPlayback(w, r, v, token, b.ExtraID, b.IdempotencyKey, b.Client)
 		return
 	}
 	if b.LiveMode != "" && b.LiveMode != "adaptive" && b.LiveMode != "low-delay" {
@@ -412,6 +413,12 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	if _, extra := s.plan["extraId"]; extra {
+		if b.Kind != "stop" && b.Kind != "seek" && b.Kind != "pause" && b.Kind != "resume" {
+			problem(w, 400, "request", "extra_command_unsupported")
+			return
+		}
+	}
 	switch b.Kind {
 	case "stop":
 		if e := i.host.Sessions.Stop(r.Context(), i.access(r, v), id); e != nil {
@@ -503,6 +510,15 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			problem(w, 400, "request", "invalid_position")
 			return
+		}
+		if _, extra := s.plan["extraId"]; extra {
+			if e := i.host.Sessions.Report(r.Context(), i.access(r, v), id, frontend.Timeline{Position: pos, State: "playing"}); e != nil {
+				fail(w, e)
+				return
+			}
+			s.position = pos
+			s.seek++
+			break
 		}
 		paths := s.plan["paths"].([]object)
 		path := selectedPlaybackPath(s.plan, paths)

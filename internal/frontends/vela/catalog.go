@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/braedonsaunders/ether/internal/frontend"
 	"github.com/braedonsaunders/ether/internal/frontend/kit/ids"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -91,9 +92,20 @@ func (i *instance) titles(r *http.Request, v *frontend.Viewer, token string, ts 
 			}
 		}
 	}
+	ratings := map[frontend.RatingKey][]frontend.RatingScore{}
+	if source, ok := i.host.Experience.(frontend.CachedRatings); ok {
+		ratings = source.PageCachedRatings(r.Context(), v, ts)
+	}
 	out := []object{}
 	for _, t := range ts {
 		item := titleWire(t)
+		scores := append([]frontend.RatingScore(nil), ratings[t.Key]...)
+		if t.VoteCount > 0 && t.Rating >= 0 && t.Rating <= 10 && !math.IsNaN(t.Rating) {
+			scores = append(scores, frontend.RatingScore{Source: "tmdb", Kind: "audience", Value: t.Rating, Scale: 10, Votes: int64(t.VoteCount)})
+		}
+		if len(scores) > 0 {
+			item["ratings"] = scores
+		}
 		item["watch"] = watchWire(states[t.Key])
 		if a := art[t.Key]; a != nil {
 			item["artwork"] = a
@@ -219,7 +231,7 @@ func (i *instance) homeVisit(r *http.Request, v *frontend.Viewer, token string, 
 	out := []object{}
 	for _, row := range rows {
 		if len(sources) > 0 {
-			sources[0][row.ID] = heroSource{kind: row.Kind, pinned: row.Layout.Always}
+			sources[0][row.ID] = heroSource{kind: row.Kind, pinned: row.Layout.Always, previewDefault: i.previewAvailable(), previewPolicy: row.Layout.PreviewOnFocusPolicy}
 		}
 		offset := 0
 		if old := r.URL.Query().Get("cursor"); old != "" {
@@ -425,7 +437,15 @@ func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 	}
 	extras := []object{}
 	for _, x := range d.Extras {
-		extras = append(extras, object{"id": ids.RatingKeyGUID(x.Key), "parentId": ids.RatingKeyGUID(x.ParentKey), "kind": x.Kind, "name": x.Title, "durationSeconds": x.Duration.Seconds(), "availability": "unavailable"})
+		availability := "unavailable"
+		if i.extraPlaybackAvailable() && (x.Kind == "trailer" || x.Kind == "teaser") {
+			availability = "unresolved"
+		}
+		kind := x.Kind
+		if kind == "teaser" {
+			kind = "trailer"
+		}
+		extras = append(extras, object{"id": ids.RatingKeyGUID(x.Key), "parentId": ids.RatingKeyGUID(x.ParentKey), "kind": kind, "name": x.Title, "durationSeconds": x.Duration.Seconds(), "availability": availability})
 	}
 	if strings.HasSuffix(r.URL.Path, "/extras") {
 		cache(w, r, object{"items": extras})

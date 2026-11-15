@@ -492,3 +492,14 @@ func (s scorecardSessionWrapper) PrepareQuality(ctx context.Context, a frontend.
 	}
 	return quality.PrepareQuality(ctx, a, id, rung, position)
 }
+
+func (s scorecardSessionWrapper) ExtraPlaybackAvailable() bool {
+	p, ok := s.embeddedScorecardSessions.(frontend.ExtraPlaybacks)
+	return ok && p.ExtraPlaybackAvailable()
+}
+func (s scorecardSessionWrapper) ExtraPlayback(ctx context.Context, r frontend.TrailerPreviewRequest) (frontend.TrailerPreviewResult, error) {
+	if p, ok := s.embeddedScorecardSessions.(frontend.ExtraPlaybacks); ok {
+		return p.ExtraPlayback(ctx, r)
+	}
+	return frontend.TrailerPreviewResult{State: "unavailable", Reason: "unsupported"}, nil
+}
