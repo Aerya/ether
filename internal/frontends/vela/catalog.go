@@ -76,6 +76,12 @@ func (i *instance) titles(r *http.Request, v *frontend.Viewer, token string, ts 
 	if err != nil {
 		return nil, err
 	}
+	return i.titlesWithUserData(r, v, token, ts, states)
+}
+
+// Detail already owns the watch/favorite/watchlist state. Do not load it again
+// only to overwrite it with the authorized detail's state below.
+func (i *instance) titlesWithUserData(r *http.Request, v *frontend.Viewer, token string, ts []frontend.Title, states map[frontend.RatingKey]frontend.WatchStatus) ([]object, error) {
 	art := map[frontend.RatingKey][]object{}
 	if signer, ok := i.host.ImageGrants.(frontend.ImagePageSigner); ok {
 		for start := 0; start < len(ts); start += 50 {
@@ -449,7 +455,7 @@ func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 		cache(w, r, object{"items": extras})
 		return
 	}
-	ts, e := i.titles(r, v, t, []frontend.Title{d.Title})
+	ts, e := i.titlesWithUserData(r, v, t, []frontend.Title{d.Title}, map[frontend.RatingKey]frontend.WatchStatus{d.Title.Key: d.UserData})
 	if e != nil {
 		fail(w, e, r)
 		return
@@ -458,12 +464,7 @@ func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 		ts[0]["themeMusic"] = theme
 	}
 	ts[0]["watch"] = watchWire(d.UserData)
-	cast, e := i.cast(r, t, d)
-	if e != nil {
-		fail(w, e, r)
-		return
-	}
-	crew, e := i.crew(r, t, d)
+	cast, crew, e := i.credits(r, t, d)
 	if e != nil {
 		fail(w, e, r)
 		return
