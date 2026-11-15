@@ -52,14 +52,15 @@ type Options struct {
 
 // Service runs Ask Ether turns.
 type Service struct {
-	model     Model
-	catalogue *tools.Catalogue
-	store     *Store
-	log       *slog.Logger
-	maxSteps  int
-	timeout   time.Duration
-	budget    int
-	heartbeat time.Duration
+	model            Model
+	catalogue        *tools.Catalogue
+	store            *Store
+	log              *slog.Logger
+	maxSteps         int
+	headlessDescribe bool
+	timeout          time.Duration
+	budget           int
+	heartbeat        time.Duration
 
 	mu    sync.Mutex
 	turns map[string]context.CancelFunc

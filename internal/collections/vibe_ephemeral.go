@@ -145,10 +145,19 @@ func vibeOwner(user *core.User) int64 {
 // VibeCollection implements core.VibeSearcher.
 func (s *Service) VibeCollection(ctx context.Context, user *core.User, query string) (*core.Collection, []core.Title, bool, error) {
 	result, err := s.DescribeSearch(ctx, user, query, false)
-	if err != nil || result.State != "ready" || result.Spec == nil || len(result.Items) == 0 {
+	if err != nil || (result.State != "ready" && result.State != "partial") || len(result.Items) == 0 {
 		return nil, nil, false, nil
 	}
 
+	// Offer provisional titles immediately. Collection actions use only the
+	// final draft so saving during refinement cannot persist an obsolete spec.
+	if result.State == "partial" {
+		return nil, result.Items, true, nil
+	}
+
+	if result.Spec == nil {
+		return nil, nil, false, nil
+	}
 	reg := s.vibeReg()
 	sig := fmt.Sprintf("ai:%d|%s", vibeOwner(user), strings.Join(strings.Fields(strings.ToLower(query)), " "))
 	e, found := reg.bySig(sig, s.now())

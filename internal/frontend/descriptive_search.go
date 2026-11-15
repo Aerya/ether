@@ -15,6 +15,7 @@ type DescriptiveSearchState string
 
 const (
 	DescriptiveReady   DescriptiveSearchState = "ready"
+	DescriptivePartial DescriptiveSearchState = "partial"
 	DescriptivePending DescriptiveSearchState = "pending"
 	DescriptiveBusy    DescriptiveSearchState = "busy"
 	DescriptiveFailed  DescriptiveSearchState = "failed"

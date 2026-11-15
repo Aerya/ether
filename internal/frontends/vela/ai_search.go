@@ -83,7 +83,7 @@ func (i *instance) startAISearch(w http.ResponseWriter, r *http.Request) {
 			problem(w, 404, "not-found", "not_found")
 			return
 		}
-		if old.status == "queued" || old.status == "running" {
+		if old.status == "queued" || old.status == "running" || old.status == "partial" {
 			old.status = "cancelled"
 			old.cancel()
 		}
@@ -91,7 +91,7 @@ func (i *instance) startAISearch(w http.ResponseWriter, r *http.Request) {
 	// Admission never spawns a goroutine that merely waits for capacity.
 	activeForScope := 0
 	for _, j := range i.aiJobs {
-		if j.scope == scope && (j.status == "running" || j.status == "queued") {
+		if j.scope == scope && (j.status == "running" || j.status == "queued" || j.status == "partial") {
 			activeForScope++
 		}
 	}
@@ -122,7 +122,27 @@ func (i *instance) startAISearch(w http.ResponseWriter, r *http.Request) {
 		}
 		j.status = "running"
 		i.aiMu.Unlock()
-		page, e := source.AISearch(ctx, v, d, j.query, frontend.ItemQuery{Limit: 50, NoTotal: true})
+		var page frontend.SearchPage
+		var e error
+		if progressive, ok := source.(frontend.ProgressiveAISearcher); ok {
+			page, e = progressive.AISearchProgress(ctx, v, d, j.query, frontend.ItemQuery{Limit: 50, NoTotal: true}, func(partial frontend.SearchPage) {
+				if ctx.Err() != nil {
+					return
+				}
+				partial.Page.Items = append([]frontend.Title(nil), partial.Page.Items[:min(50, len(partial.Page.Items))]...)
+				cards, err := i.titles(r.WithContext(i.host.Experience.NoProviderWait(ctx)), v, token, partial.Page.Items)
+				if err != nil {
+					return
+				} // The final projection still reports failures.
+				i.aiMu.Lock()
+				if j.status == "running" {
+					j.page, j.titles, j.status = partial, cards, "partial"
+				}
+				i.aiMu.Unlock()
+			})
+		} else {
+			page, e = source.AISearch(ctx, v, d, j.query, frontend.ItemQuery{Limit: 50, NoTotal: true})
+		}
 		var titles []object
 		if e == nil && (page.Descriptive == nil || page.Descriptive.State == frontend.DescriptiveReady) {
 			page.Page.Items = append([]frontend.Title(nil), page.Page.Items[:min(50, len(page.Page.Items))]...)
@@ -212,7 +232,7 @@ func (i *instance) readAISearch(w http.ResponseWriter, r *http.Request, cancel b
 		problem(w, 409, "conflict", "generation_mismatch")
 		return
 	}
-	if cancel && (j.status == "queued" || j.status == "running") {
+	if cancel && (j.status == "queued" || j.status == "running" || j.status == "partial") {
 		j.status = "cancelled"
 		j.cancel()
 	}
@@ -223,7 +243,7 @@ func (i *instance) readAISearch(w http.ResponseWriter, r *http.Request, cancel b
 		i.unavailable(w, r)
 		return
 	}
-	if wire["status"] == "complete" {
+	if wire["status"] == "complete" || wire["status"] == "partial" {
 		r = r.WithContext(i.host.Experience.NoProviderWait(r.Context()))
 		// Recheck today's policy in one local batch. Never rerun scoring,
 		// detail enrichment, user-data decoration or artwork signing here.

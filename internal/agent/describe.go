@@ -39,10 +39,11 @@ func (s *Service) DescribeCollection(ctx context.Context, query string) (spec *c
 	if _, ok := catalogue.Lookup(ctx, p, "collection_draft"); !ok {
 		return nil, fmt.Errorf("collection draft tool is not available")
 	}
-	// Share the configured model, prompts, loop budgets and actual tools. Only
-	// the catalogue and turn bookkeeping are private to this headless run.
+	// Share the configured model, prompts, token budget and actual tools. Cap
+	// this headless turn at four model steps, keeping its last successful draft.
 	runner := New(Options{Model: s.model, Catalogue: catalogue, Store: s.store, Logger: s.log,
-		MaxSteps: s.maxSteps, TurnTimeout: s.timeout, TokenBudget: s.budget})
+		MaxSteps: min(s.maxSteps, 4), TurnTimeout: s.timeout, TokenBudget: s.budget})
+	runner.headlessDescribe = true
 	thread, err := s.store.CreateThread(ctx, threadTitle(query))
 	if err != nil {
 		return nil, err
@@ -66,9 +67,6 @@ func (s *Service) DescribeCollection(ctx context.Context, query string) (spec *c
 			id, _ := c["toolCallId"].(string)
 			name, _ := c["toolName"].(string)
 			calls[id] = name
-			if name == "collection_draft" {
-				spec = nil
-			}
 		case "tool-output-available":
 			id, _ := c["toolCallId"].(string)
 			if calls[id] == "collection_draft" {
@@ -82,12 +80,14 @@ func (s *Service) DescribeCollection(ctx context.Context, query string) (spec *c
 				if e != nil {
 					return e
 				}
-				spec = output.Spec
+				if output.Spec != nil {
+					spec = output.Spec
+				}
 			}
 		case "error":
 			turnErr = fmt.Errorf("collection agent turn failed")
 		case "finish":
-			if c["finishReason"] != "stop" {
+			if c["finishReason"] != "stop" && !(c["finishReason"] == "tool-calls" && spec != nil) {
 				turnErr = fmt.Errorf("collection agent did not finish its turn")
 			}
 		}
