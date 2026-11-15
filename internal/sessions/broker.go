@@ -1064,7 +1064,17 @@ func (b *Broker) Recover(ctx context.Context, id, url string, at time.Duration) 
 // HasBinding reports whether this broker owns an encoder ID.
 func (b *Broker) HasBinding(id string) bool { _, ok := b.bindings.Get(id); return ok }
 func (b *Broker) TranscodeFor(_ context.Context, id string) (core.HLSSession, bool) {
-	return TranscodeFor(b.bindings, b.deps.Transcoder, id)
+	// Neutral frontends use the public session ID, which is also the encoder
+	// ID. Do not interpret it as a playback source ID: those are distinct.
+	if b.HasBinding(id) {
+		return b.transcodeSession(id)
+	}
+	for _, encoderID := range b.bindings.ByPlayID(id) {
+		if hs, ok := b.transcodeSession(encoderID); ok && hs != nil {
+			return hs, true
+		}
+	}
+	return nil, false
 }
 func (b *Broker) Sessions(ctx context.Context, a frontend.SessionAccess) ([]frontend.Session, error) {
 	v, err := b.viewer(ctx, a.Viewer)
