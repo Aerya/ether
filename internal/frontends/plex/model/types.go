@@ -247,6 +247,7 @@ type Metadata struct {
 	GrandparentArt        string  `plex:"grandparentArt,omitempty"`
 	Theme                 string  `plex:"theme,omitempty"`
 	GrandparentTheme      string  `plex:"grandparentTheme,omitempty"`
+	ParentTheme           string  `plex:"parentTheme,omitempty"`
 	Duration              int64   `plex:"duration,omitempty"`
 	OriginallyAvailableAt string  `plex:"originallyAvailableAt,omitempty"`
 	LeafCount             *int    `plex:"leafCount"`

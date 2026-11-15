@@ -940,6 +940,7 @@ export const EXTRAS: FieldGroup[] = localized(() => [
     title: t("Trailers"),
     description: t("Play a trailer before a movie or episode."),
     fields: [
+      { key: "themeMusic", label: t("Theme music"), kind: "bool" },
       {
         key: "enabled",
         label: t("Trailers and Cinema Trailers"),
