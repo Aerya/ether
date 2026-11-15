@@ -171,6 +171,7 @@ type Channel struct {
 	Favorite      bool           `json:"favorite"`
 	Logo          string         `json:"logo,omitempty"`
 	LogoMatched   bool           `json:"logoMatched,omitempty"`
+	ProviderAdult bool           `json:"providerAdult,omitempty"`
 	Rating        string         `json:"rating,omitempty"`
 	SourceID      string         `json:"sourceId,omitempty"`
 	GuideID       string         `json:"guideId,omitempty"`
@@ -217,9 +218,10 @@ type Channel struct {
 	adult bool
 }
 type Source struct {
-	LoginPool    bool            `json:"loginPool,omitempty"`
-	Logins       []ProviderLogin `json:"logins,omitempty"`
-	loginStreams map[string]map[string]string
+	UnratedRating string          `json:"unratedRating,omitempty"`
+	LoginPool     bool            `json:"loginPool,omitempty"`
+	Logins        []ProviderLogin `json:"logins,omitempty"`
+	loginStreams  map[string]map[string]string
 
 	Disabled bool `json:"disabled,omitempty"`
 	// LiveTV defaults to true for existing connections; VOD is opt-in.

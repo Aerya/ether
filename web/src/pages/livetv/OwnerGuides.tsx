@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Checkbox, Input, Switch, toast } from "@braedonsaunders/appkit-ui";
 import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2 } from "lucide-react";
+import { UnratedChannelRating } from "./UnratedChannelRating";
 import { Drawer } from "../../components/Drawer";
 import { Segmented } from "../../components/fields";
 import { t, tn } from "../../i18n";
@@ -9,6 +10,7 @@ import { apiFetch, errorMessage, uuid } from "../../lib/api";
 type Group = { sourceId: string; name: string; count?: number; sourceName?: string };
 type Channel = { id: string; name: string; number: string; sourceId?: string; group?: string };
 type Guide = {
+  unratedRating?: string;
   id: string;
   name: string;
   groups: Group[];
@@ -281,6 +283,10 @@ export function OwnerGuides({ query = "" }: { query?: string }) {
                 onChange={(e) => setDraft({ ...draft, name: e.currentTarget.value })}
               />
             </label>
+            <UnratedChannelRating
+              value={draft.unratedRating ?? ""}
+              onChange={(unratedRating) => setDraft({ ...draft, unratedRating })}
+            />
             <label className="flex items-center gap-2 text-sm">
               <Switch
                 checked={!draft.hidden}

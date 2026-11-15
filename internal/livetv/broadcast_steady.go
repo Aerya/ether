@@ -293,6 +293,7 @@ func (s *Service) admitSteady(ctx context.Context, c Channel) (*steadyAdmission,
 	probeCtx, stopProbes := context.WithTimeout(ctx, 3*time.Second)
 	defer stopProbes()
 	var probed *steadyAdmission
+	silent := false
 	candidates := s.orderedSourceCandidates(c)
 	for i, src := range candidates {
 		if probeCtx.Err() != nil {
@@ -327,9 +328,18 @@ func (s *Service) admitSteady(ctx context.Context, c Channel) (*steadyAdmission,
 			link.close(s)
 			continue
 		}
+		if !liveInputHasAudio(info) {
+			silent = true
+			s.logger().Info("live silent source deferred", "channel", c.ID, "input", src.ID, "reason", "trying other candidates before silent fallback")
+			link.close(s)
+			continue
+		}
 		link.format = steadyInputFormat(info)
 		probed = &steadyAdmission{shape: steadyShapeFor(info), link: link, info: info}
 		break
+	}
+	if probed == nil && silent {
+		return nil, steadyRefusedVideoOnly, "all playable candidates lack audio; trying direct fallback"
 	}
 	if probed == nil {
 		// Nothing answered within the tune: Steady still starts on its
@@ -437,6 +447,9 @@ func probeCacheKey(ss *session) string {
 	if len(ss.inputHeaders) != 0 {
 		encoded, _ := json.Marshal(ss.inputHeaders)
 		key = stableID(ss.inputURL, string(encoded))
+	}
+	if ss.caps.MaxHeight > 0 || ss.caps.MaxBitrateKbps > 0 {
+		key = stableID(key, variantClass(core.ClientCaps{MaxHeight: ss.caps.MaxHeight, MaxBitrateKbps: ss.caps.MaxBitrateKbps}))
 	}
 	return key
 }

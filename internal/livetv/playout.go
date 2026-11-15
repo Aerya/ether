@@ -717,7 +717,7 @@ func (s *Service) Failover(ctx context.Context, id string, u *core.User) error {
 // startIPTV recognizes HLS without assuming URL suffixes (many owners use
 // signed extensionless URLs). Other HTTP streams are remuxed through ffmpeg,
 // whose existing input layer reconnects on network errors with bounded delay.
-func (s *Service) startIPTVSource(ctx context.Context, ss *session) error {
+func (s *Service) startIPTVSource(ctx context.Context, ss *session, deferSilent bool) error {
 	if ss.closed {
 		return core.ErrNotFound
 	}
@@ -764,6 +764,9 @@ func (s *Service) startIPTVSource(ctx context.Context, ss *session) error {
 				copy.Duration = 0
 				info = &copy
 				ss.info.MediaInfo = info
+				if deferSilent && !liveInputHasAudio(info) {
+					return errSilentInput
+				}
 				if analyze {
 					// A playlist is a transport, not evidence that its codecs are
 					// playable. MPEG-2/MP2 HLS needs conversion on Apple TV too.
@@ -791,6 +794,9 @@ func (s *Service) startIPTVSource(ctx context.Context, ss *session) error {
 	copy := *info
 	copy.Duration = 0
 	ss.info.MediaInfo = &copy
+	if deferSilent && !liveInputHasAudio(info) {
+		return errSilentInput
+	}
 	return s.startIPTVRelay(ctx, ss, copy)
 }
 

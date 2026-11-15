@@ -1569,6 +1569,7 @@
   "m_05742455c0c8cd": "Bredare sökningar när den första sökningen inte hittade något spelbart.",
   "m_057540dc872436": "Inte kontrollerat ännu. Enheter i ditt nätverk bör använda {address}. Ether har inte bekräftat att de kan ansluta.",
   "m_0575616742f24c": "Aldrig längre ned än plats för {title}",
+  "m_0576036bde69c5": "Åldersgräns för kanaler som saknar en",
   "m_0576a36f3b9de8": "Ether installerades med din pakethanterare. Ladda ned det nya paketet och installera det:",
   "m_0576f94aa5c08a": {
     "one": "{count} diskuppslag",
@@ -8370,6 +8371,7 @@
   "m_1d539bf3ad53f2": "0 härleder gränsen från dina Usenet-anslutningar.",
   "m_1d53e55257404c": "Tittarkonton",
   "m_1d53f68e6961e1": "De största releaserna, oavsett vad någon tittar på",
+  "m_1d5405a5b98a38": "Profiler med en åldersgräns döljer kanaler utan åldersmärkning. Välj den åldersmärkning som ska gälla för dessa kanaler.",
   "m_1d5550ded8483e": "Inget val",
   "m_1d56244b88ecc0": "Rotten Tomatoes-kritiker",
   "m_1d56fd7503ad94": "Stremio-tillägg · Torrent",

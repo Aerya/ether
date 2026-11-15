@@ -35,6 +35,7 @@ import type { ParamField } from "../../lib/rules";
 import { formatBytes, formatNumber, relativeTime } from "../../lib/format";
 import { ChannelGroups, ProviderAccountCard } from "./SourceGroups";
 import { sourceImportError } from "./sourceErrors";
+import { UnratedChannelRating } from "./UnratedChannelRating";
 import { SourceLimits } from "./SourceLimits";
 import {
   dayClock,
@@ -194,6 +195,7 @@ export function SourceEditor({
             postalCode: source.postalCode,
             playlistUrl: source.playlistUrl ?? "",
             guideUrl: source.guideUrl ?? "",
+            unratedRating: source.unratedRating,
             refreshHours: source.refreshHours,
             activityRefreshMinutes: source.activityRefreshMinutes,
             useLiveTV: source.useLiveTV,
@@ -532,6 +534,11 @@ export function SourceEditor({
           ]}
         />
       ) : null}
+
+      <UnratedChannelRating
+        value={draft.unratedRating ?? ""}
+        onChange={(unratedRating) => setDraft({ ...draft, unratedRating })}
+      />
 
       {onTab === "limits" ? (
         <section className="rounded-2xl border border-border bg-surface p-5">

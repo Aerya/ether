@@ -95,7 +95,9 @@ func TestLiveChangeStormFailsOver(t *testing.T) {
 	}
 	// Seeing that same change again must not consume another storm slot.
 	before := p.ladder.state("healed").changes
-	if healed.noteChange(oldPump) || healed.noteChange(oldPump) || before != p.ladder.state("healed").changes {
+	firstStorm := healed.noteChange(oldPump)
+	secondStorm := healed.noteChange(oldPump)
+	if firstStorm || secondStorm || before != p.ladder.state("healed").changes {
 		t.Fatal("duplicate change signature counted as a storm")
 	}
 }

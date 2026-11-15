@@ -340,6 +340,19 @@ func (s *Service) ResolveStreamSource(ctx context.Context, c Channel, src Stream
 	return resolved, headers, nil
 }
 
+var errSilentInput = errors.New("live input has no audio")
+
+func liveInputHasAudio(info *core.MediaInfo) bool {
+	if info != nil {
+		for _, st := range info.Streams {
+			if st.Type == "audio" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // startIPTV selects one input per viewing session, under the caller's existing
 // ten-second startup deadline. It never substitutes another provider's bytes,
 // keys or media sequence into the active HLS resource map.
@@ -368,7 +381,9 @@ func (s *Service) startIPTV(ctx context.Context, ss *session) error {
 	if len(candidates) == 0 && !earliestRetry.IsZero() {
 		return &TuneError{Code: "source_cooldown", Stage: "source_selection", RetryAfter: earliestRetry.Sub(s.o.Now()), cause: core.ErrNotAvailable}
 	}
-	for index, src := range candidates {
+	primaryCount := len(candidates)
+	for index := 0; index < len(candidates); index++ {
+		src := candidates[index]
 		started := time.Now()
 		log := s.sessionLog(ss).With("input", src.ID, "attempt", index+1, "candidates", len(candidates))
 		log.Debug("live source attempt started")
@@ -401,7 +416,7 @@ func (s *Service) startIPTV(ctx context.Context, ss *session) error {
 		// with the provider URL or headers on their command line.
 		err = s.grantDirectInput(ss, grantSrc, headers)
 		if err == nil {
-			err = s.startIPTVSource(attemptCtx, ss)
+			err = s.startIPTVSource(attemptCtx, ss, primaryCount > 1 && index < primaryCount)
 		}
 		cancel()
 		if err == nil {
@@ -413,6 +428,13 @@ func (s *Service) startIPTV(ctx context.Context, ss *session) error {
 		ss.owned.close()
 		ss.owned = nil
 		s.revokeInput(ss)
+		if errors.Is(err, errSilentInput) {
+			// Retry silent inputs only after every original candidate. No health
+			// penalty: they remain usable when all audible inputs are down.
+			candidates = append(candidates, src)
+			log.Info("live silent source deferred", "reason", "trying other candidates before silent fallback")
+			continue
+		}
 		last = Diagnose("source_start", err)
 		if !errors.Is(ctx.Err(), context.Canceled) {
 			s.recordSourceHealth(c.ID, src, err, false)
