@@ -48,6 +48,23 @@ func (i *instance) liveTVInfo(w http.ResponseWriter, r *http.Request) {
 	jsonReply(w, body)
 }
 
+// liveTVGuideInfo answers GET /LiveTv/GuideInfo. Jellyfin web's Guide tab
+// requests it before drawing the grid and spins forever without it. Jellyfin
+// reports the span it holds programme data for; Ether serves guide windows on
+// demand, so it reports today through the two-week guide horizon.
+func (i *instance) liveTVGuideInfo(w http.ResponseWriter, r *http.Request) {
+	viewer, _, err := i.viewer(r)
+	if err != nil || viewer == nil {
+		http.Error(w, "Unauthorized", 401)
+		return
+	}
+	start := time.Now().UTC().Truncate(time.Hour)
+	jsonReply(w, map[string]any{
+		"StartDate": start.Format("2006-01-02T15:04:05.0000000Z"),
+		"EndDate":   start.Add(14 * 24 * time.Hour).Format("2006-01-02T15:04:05.0000000Z"),
+	})
+}
+
 func (i *instance) channelDTO(r *http.Request, token string, ch frontend.LiveChannel) (map[string]any, bool) {
 	id, err := ids.StringGUID(ids.Channel, ch.ID)
 	if err != nil {
