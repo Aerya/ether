@@ -243,4 +243,9 @@ func (s *Service) fetchTheme(ctx context.Context, t core.Title, name string) err
 }
 
 // Close cancels and joins any on-demand theme worker and its media subprocess.
-func (s *Service) Close() { s.themeCancel(); s.themeWork.Lock(); s.themeWork.Unlock() }
+func (s *Service) Close() {
+	s.themeCancel()
+	// Join barrier: the worker holds themeWork while it runs.
+	s.themeWork.Lock()
+	s.themeWork.Unlock() //nolint:staticcheck // SA2001: intentional join barrier
+}

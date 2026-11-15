@@ -342,8 +342,8 @@ func nextChannelNumber(all []ChannelSummary) string {
 // ChannelPage returns one page of full channel records for the console list
 // and guide, plus the totals and groups the page needs to lay out the rest.
 func (s *Service) ChannelPage(ctx context.Context, q ChannelPageQuery) (ChannelPage, error) {
-	all, err := s.channelSummaries(ctx)
-	if err != nil {
+	// Builds or refreshes the immutable lineup index read under lineupMu below.
+	if _, err := s.channelSummaries(ctx); err != nil {
 		return ChannelPage{}, err
 	}
 	stats, err := s.guideCoverageStats(ctx)
@@ -367,7 +367,7 @@ func (s *Service) ChannelPage(ctx context.Context, q ChannelPageQuery) (ChannelP
 	candidates := s.lineupOrders[kind]
 	// A concurrent generation rebuild may replace the cache after our index
 	// read. Re-read the matching immutable index and its order together.
-	all = s.lineupIndex
+	all := s.lineupIndex
 	if candidates == nil {
 		candidates = s.lineupOrders["number"]
 	}

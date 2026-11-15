@@ -42,7 +42,7 @@ func TestThemeCachePolicy(t *testing.T) {
 	}
 	close(release)
 	s.themeWork.Lock()
-	s.themeWork.Unlock()
+	s.themeWork.Unlock() //nolint:staticcheck // SA2001: wait for the worker to finish
 	s.Theme(show, true)
 	if calls.Load() != 1 {
 		t.Fatal("negative cooldown ignored")
