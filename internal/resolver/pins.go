@@ -19,7 +19,9 @@ import (
 // A pin selects the source for playback. Resolve validates only that release;
 // rejection, failed health, blocklisting and failover exclusion are errors,
 // never permission to substitute another release. Pins override owner quality
-// and identity heuristics, but retain hard playback gates below.
+// and identity heuristics, but retain source safety gates below. Client codec
+// and HDR support are delivery decisions: playback can remux, transcode or
+// tone-map the pinned source, or explain why no delivery path exists.
 //
 // An explicit viewer version choice overrides a pin. The logical Auto slot
 // still honours it. Offline downloads retain their own profile and ignore pins.
@@ -276,7 +278,7 @@ func autoVersion(prefer string) bool {
 
 // pinRejectReason is the gate set for an owner pin (see the package
 // comment above): "" to accept.
-func (s *Service) pinRejectReason(rel core.Release, sreq core.SearchRequest, caps core.ClientCaps, exclude map[string]bool) string {
+func (s *Service) pinRejectReason(rel core.Release, sreq core.SearchRequest, _ core.ClientCaps, exclude map[string]bool) string {
 	switch {
 	case rel.Password && rel.Protocol == core.ProtocolTorrent:
 		return "passworded"
@@ -288,10 +290,6 @@ func (s *Service) pinRejectReason(rel core.Release, sreq core.SearchRequest, cap
 		return "season pack (skipped in v1)"
 	case sreq.Type == core.TypeEpisode && rel.Info.FullSeason && !packCoversSeason(rel.Info, sreq.Season):
 		return "season/episode mismatch"
-	case rel.Info.VideoCodec != "" && len(caps.VideoCodecs) > 0 && !caps.SupportsVideo(rel.Info.VideoCodec):
-		return "video codec unsupported by client"
-	case rel.Info.DolbyVision && !rel.Info.HDR10 && !caps.DolbyVision && len(caps.VideoCodecs) > 0:
-		return "dolby vision without hdr10 fallback on a client without dolby vision"
 	}
 	return ""
 }

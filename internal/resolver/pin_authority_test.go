@@ -20,7 +20,11 @@ func TestPinAuthoritativeSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	searches := idx.searches.Load()
-	pinned, _ := svc.LookupRelease("sd720")
+	// A DV-only HEVC source on an H.264-only client must still reach delivery
+	// planning. Resolution does not require a compatible direct-play path.
+	pinned, _ := svc.LookupRelease("uhd")
+	pinned.Info.VideoCodec = "hevc"
+	pinned.Info.DolbyVision, pinned.Info.HDR10 = true, false
 	if _, err := svc.Pin(ctx, req.Title.Key, "", pinned, ""); err != nil {
 		t.Fatal(err)
 	}

@@ -196,15 +196,15 @@ func TestPinHonouredAndGated(t *testing.T) {
 	if err != nil || res.Release.ID != "uhd" {
 		t.Fatalf("4K pin res=%+v err=%v", res, err)
 	}
-	// ...but a client that cannot decode it gets a clear failure, never another release.
+	// ...and client codec/DV limits are handled by the playback delivery decision.
 	res, err = svc.Resolve(ctx, core.ResolveRequest{Title: matrixTitle(), Client: webCaps()})
-	if !errors.Is(err, core.ErrNotAvailable) || res != nil || !strings.Contains(err.Error(), "video codec unsupported") {
+	if err != nil || res == nil || res.Release.ID != "uhd" {
 		t.Fatalf("hevc pin on h264 client res=%+v err=%v", res, err)
 	}
-	if tr := svc.Traces()[0]; tr.PinStatus != "rejected: video codec unsupported by client" {
+	if tr := svc.Traces()[0]; tr.PinStatus != "used" {
 		t.Fatalf("pin status %q", tr.PinStatus)
 	}
-	if p, _ := svc.PinFor(matrixTitle().Key); p.LastStatus != PinRejected {
+	if p, _ := svc.PinFor(matrixTitle().Key); p.LastStatus != PinHealthy {
 		t.Fatalf("pin %+v", p)
 	}
 	// Downloads ignore pins.
