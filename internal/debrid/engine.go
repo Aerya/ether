@@ -2349,7 +2349,15 @@ func (s *httpSource) ReadMetadataAtContext(ctx context.Context, p []byte, off in
 	if isAnalysisRead(ctx) {
 		return s.ReadAtAnalysisContext(ctx, p, off)
 	}
-	return s.read(ctx, p, off, fetchMetadata, false)
+	// Probe ranges own only the blocks they ask for. Do not leave their
+	// response bodies holding connections after the probe has its bytes.
+	epoch, cancel := newSeekEpoch(ctx)
+	defer func() {
+		cancel()
+		runs, _ := epoch.Value(seekRunsKey{}).(*seekRuns)
+		runs.wait()
+	}()
+	return s.read(epoch, p, off, fetchMetadata, false)
 }
 
 func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMode, live bool) (int, error) {
@@ -2379,6 +2387,9 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 		runLen = min(maxRun, max(1, lastBlock-first+1))
 	}
 	var liveRun, meterEpoch context.Context
+	if mode == fetchMetadata {
+		liveRun = ctx
+	}
 	n := 0
 	if live && callerUrgent(ctx) {
 		s.beginConsumption(f.e.now())
@@ -2405,10 +2416,9 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 			sequential = f.presentLocked(first)
 			f.bmu.Unlock()
 		}
-		// A seek, or the first read far from the head: drop speculative
-		// fills of the start of the file and take a connection now.
-		far := first > 2
-		seek := !sequential && (s.last >= 0 || far)
+		// The first live read needs the same handover as a seek, even at
+		// the head: preparation must yield before playback takes a slot.
+		seek := s.last < 0 || !sequential
 		var oldRuns *seekRuns
 		seekEnded := false
 		if seek {
@@ -2451,15 +2461,19 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 			if err := ctx.Err(); err != nil {
 				return 0, err
 			}
-			// Register the playhead first so read-ahead neither claims its
-			// blocks nor counts an obsolete run toward target parallelism.
-			f.bmu.Lock()
-			present := f.presentLocked(first)
-			f.bmu.Unlock()
-			if !present {
-				f.startRun(inheritReadPriority(liveRun, ctx), first,
-					min(maxRun, max(runLen, lastBlock-first+1)), mode, false)
-			}
+		}
+		// Every client range registers foreground demand before speculation,
+		// including the first head range and overlapping startup ranges.
+		f.bmu.Lock()
+		present := f.presentLocked(first)
+		fl := f.flights[first]
+		f.bmu.Unlock()
+		if !present {
+			fl, _ = f.startRun(inheritReadPriority(liveRun, ctx), first,
+				min(maxRun, max(runLen, lastBlock-first+1)), mode, false)
+		}
+		if fl != nil && fl.demand != nil && callerUrgent(ctx) {
+			fl.demand.Store(true)
 		}
 		// Start the entire bounded burst before waiting for the playhead.
 		s.readAhead(lastBlock)
