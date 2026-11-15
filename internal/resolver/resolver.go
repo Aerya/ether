@@ -1986,6 +1986,16 @@ func rejectIdentityYears(rel core.Release, t *core.Title, sreq core.SearchReques
 		matchesAlternativeTitle(rel.Info, sreq.AlternativeTitles) ||
 		(!isEpisode && matchesAlternativeTitle(rel.Info, t.AlternativeTitles)) ||
 		(isEpisode && matchesAlternativeTitle(rel.Info, t.ShowAlternativeTitles))
+	if !titleOK {
+		if stripped, ok := releaseparse.StripTrailingLanguage(rel.Info.Title); ok {
+			for _, expected := range expectedTitlesFor(t, sreq) {
+				if releaseparse.TitlesMatch(stripped, expected) {
+					titleOK = true
+					break
+				}
+			}
+		}
+	}
 	if isEpisode && sreq.Season == 0 {
 		prefix := core.ReleaseInfo{Title: releaseparse.SpecialSeriesTitle(rel.Name)}
 		titleOK = titleOK || releaseparse.TitleMatches(prefix, wantTitle) ||
