@@ -39,6 +39,8 @@ type LibraryPageExclusions struct {
 
 // ServiceDeps contains trusted host dependencies, never provided by a frontend.
 type ServiceDeps struct {
+	// NextUp returns episodes authorized for the supplied active viewer.
+	NextUp func(context.Context, *core.User, int) ([]core.Title, error)
 	// LibraryPresentation and BuiltinNative are supplied by the surface wiring.
 	LibraryPresentation func(core.Presentations, core.MediaType) (core.MediaType, string, bool)
 	BuiltinNative       func(core.MediaType) string
@@ -290,6 +292,10 @@ func (s *Service) viewer(ctx context.Context, v *core.User) (*core.User, error) 
 	}
 	if memo := frontend.RequestMemoFrom(ctx); memo != nil {
 		memo.Mu.Lock()
+		if memo.Viewer == nil || memo.Viewer.ID != active.ID {
+			memo.Visible = nil
+			memo.Aired = nil
+		}
 		memo.Viewer = active
 		memo.Mu.Unlock()
 	}
@@ -1802,10 +1808,28 @@ func (s *Service) UserData(ctx context.Context, viewer *core.Viewer, keys []core
 	}
 	allowed := make([]core.RatingKey, 0, len(keys))
 	var pluginKeys, tmdbKeys []core.RatingKey
+	// A list may already have authorized these same keys in this request.
+	// Reuse only verdicts belonging to this active viewer.
+	tmdbAllowed := map[core.RatingKey]bool{}
+	known := map[core.RatingKey]bool{}
+	if memo := frontend.RequestMemoFrom(ctx); memo != nil {
+		memo.Mu.Lock()
+		if memo.Viewer != nil && memo.Viewer.ID == v.ID {
+			for _, key := range keys {
+				if !key.IsPluginKey() {
+					if yes, ok := memo.Visible[key]; ok {
+						known[key] = true
+						tmdbAllowed[key] = yes
+					}
+				}
+			}
+		}
+		memo.Mu.Unlock()
+	}
 	for _, k := range keys {
 		if k.IsPluginKey() {
 			pluginKeys = append(pluginKeys, k)
-		} else {
+		} else if !known[k] {
 			tmdbKeys = append(tmdbKeys, k)
 		}
 	}
@@ -1822,9 +1846,7 @@ func (s *Service) UserData(ctx context.Context, viewer *core.Viewer, keys []core
 			}
 		}
 	}
-	var tmdbAllowed map[core.RatingKey]bool
 	if len(tmdbKeys) > 0 {
-		tmdbAllowed = make(map[core.RatingKey]bool, len(tmdbKeys))
 		if s.d.CachedGetMany != nil {
 			// Watch status needs current authorization, not cast, crew or trailers.
 			// Keep the full read fallback for sources without visibility rows.

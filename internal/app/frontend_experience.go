@@ -519,6 +519,9 @@ func (a *App) newSurfaceExperience(protocol core.Protocol, artwork ...frontend.A
 		deps.Collections = a.discoveryPersonal.ReviewCollections(a.collections)
 	}
 	deps.Recommender = a.personalize
+	deps.NextUp = func(ctx context.Context, viewer *core.User, limit int) ([]core.Title, error) {
+		return a.experienceContinueKind(ctx, viewer, libs, rowVis, core.TypeShow, limit)
+	}
 	deps.VibeSearch = a.collections
 	deps.SearchSources = a.searchSourcesFor(stepAside)
 	deps.FavoriteShows = a.favoriteShows

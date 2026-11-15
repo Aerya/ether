@@ -329,8 +329,30 @@ func (i *instance) browseRoutes() error {
 					i.logRowFailure(purpose, err)
 					titles = nil
 				}
+			} else if activity, ok := i.host.Experience.(frontend.NextUpActivity); purpose == frontend.RowNextUp && ok {
+				offset, limit := queryInt(r, "StartIndex", 0), queryInt(r, "Limit", 50)
+				if offset > 500 || limit > 500 || offset > 500-limit {
+					http.Error(w, "Unsupported page", http.StatusBadRequest)
+					return
+				}
+				if limit != 0 {
+					titles, err = activity.NextUp(r.Context(), v, device(r), offset+limit)
+					if err != nil {
+						i.logRowFailure(purpose, err)
+						titles = nil
+					}
+				}
 			} else {
-				rows, err := i.host.Experience.Rows(r.Context(), frontend.RowRequest{Viewer: v, Device: device(r), Placement: frontend.PlacementHome, Purpose: purpose})
+				offset, limit := queryInt(r, "StartIndex", 0), queryInt(r, "Limit", 50)
+				if offset > 500 || limit > 500 || offset > 500-limit {
+					http.Error(w, "Unsupported page", http.StatusBadRequest)
+					return
+				}
+				if limit == 0 {
+					i.replyItems(w, r, i.queryResult([]any{}, 0, offset))
+					return
+				}
+				rows, err := i.host.Experience.Rows(r.Context(), frontend.RowRequest{Viewer: v, Device: device(r), Placement: frontend.PlacementHome, Purpose: purpose, Limit: max(50, offset+limit)})
 				if err != nil {
 					i.logRowFailure(purpose, err)
 					rows = nil

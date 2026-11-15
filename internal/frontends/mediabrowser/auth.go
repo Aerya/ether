@@ -388,11 +388,6 @@ func (i *instance) finishSignIn(ctx context.Context, v *frontend.Viewer, dev fro
 	}); ok {
 		_ = note.NoteSignIn(ctx, v.ID)
 	}
-	if warm, ok := i.host.VirtualPaths.(interface {
-		Warm(context.Context, *frontend.Viewer, frontend.Device)
-	}); ok {
-		warm.Warm(ctx, v, dev)
-	}
 }
 
 // authUserDTO is the sign-in user: static keys only. Preferences, home order

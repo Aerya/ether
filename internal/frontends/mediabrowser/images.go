@@ -82,7 +82,7 @@ func rankedRowRanks(r *http.Request) map[frontend.RatingKey]int {
 }
 
 func (i *instance) gridImagesFor(r *http.Request, titles []frontend.Title) map[frontend.RatingKey]map[string]any {
-	return i.gridImageRows(r, titles, nil, nil)
+	return i.gridImagesWithParents(r, titles)
 }
 
 // gridListImages signs the artwork a library list carries. Like Jellyfin, a
@@ -96,7 +96,50 @@ func (i *instance) gridListImages(r *http.Request, titles []frontend.Title) map[
 	if kinds != nil && len(kinds) == 0 {
 		return map[frontend.RatingKey]map[string]any{}
 	}
+	if kinds == nil {
+		return i.gridImagesWithParents(r, titles)
+	}
 	return i.gridImageRows(r, titles, nil, kinds)
+}
+
+// Sign a page and its parent images together. Both sets use the same policy
+// and all image kinds, so splitting them repeats the authorization and facts.
+func (i *instance) gridImagesWithParents(r *http.Request, titles []frontend.Title) map[frontend.RatingKey]map[string]any {
+	if i == nil {
+		return nil
+	}
+	if i.protocol != "jellyfin" || r == nil {
+		return i.gridImageRows(r, titles, nil, nil)
+	}
+	cache, _ := r.Context().Value(showArtworkCacheKey{}).(map[frontend.RatingKey]map[string]any)
+	if cache == nil {
+		return i.gridImageRows(r, titles, nil, nil)
+	}
+	batch := append([]frontend.Title(nil), titles...)
+	seen := map[frontend.RatingKey]bool{}
+	for _, title := range titles {
+		seen[title.Key] = true
+	}
+	var parents []frontend.RatingKey
+	for _, title := range titles {
+		if title.Type != "episode" && title.Type != "season" {
+			continue
+		}
+		show := parentShowKey(title)
+		if _, ok := cache[show]; show == 0 || ok || seen[show] {
+			continue
+		}
+		seen[show] = true
+		parents = append(parents, show)
+		batch = append(batch, frontend.Title{Key: show})
+	}
+	rows := i.gridImageRows(r, batch, nil, nil)
+	for _, key := range parents {
+		if art, ok := rows[key]; ok {
+			cache[key] = art
+		}
+	}
+	return rows
 }
 
 // listImageKinds maps EnableImages/EnableImageTypes to image kinds: nil is
