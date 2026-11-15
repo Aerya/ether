@@ -112,6 +112,12 @@ Ether; read with SecretGet only where needed, never echo them into views/logs.
 | onair_content / livetv_pack | declared feeds/segments/TV packs | Only services the handler actually needs |
 
 Settings, KV, Log and NotifyOwner do not require an extra behavior capability.
+ArchiveList/Open read plugin-cached ZIP, 7z (Copy/LZMA/LZMA2), and RAR 4/5.
+Returned chunks are at most 1 MiB. Solid ranges restart at the block beginning
+per call; prefer large sequential chunks. Host memory/byte grants apply to
+metadata, dictionaries and decoding. Split archives, encryption, unsafe names
+and special files are refused. Other 7z coder chains are unsupported.
+
 FoldersList/Stat/Hash need `folders:read` plus an owner-selected root; they return
 metadata/digests, not bytes. Viewer access requires that viewer's grant.
 Host calls enforce permissions again on every request; revocation is immediate.

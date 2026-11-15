@@ -157,6 +157,9 @@ export interface EtherHost {
     open(blobRef: string): MaybePromise<Uint8Array>;
     read?(blobRef: string, range: DataRange): MaybePromise<Uint8Array>;
   };
+  /** ZIP (Store/Deflate), 7z (Copy/LZMA/LZMA2), and RAR 4/5 data services.
+   * Ranges bound returned bytes; solid reads restart at the block beginning.
+   * Prefer large sequential chunks. Host byte and memory grants apply. */
   archive?: {
     list(blobRef: string): MaybePromise<ArchiveMember[]>;
     open(blobRef: string, member: number, range: DataRange): MaybePromise<Uint8Array>;
