@@ -489,6 +489,10 @@ func (i *instance) playbackInfo(w http.ResponseWriter, r *http.Request) {
 	if playback {
 		session, err := i.host.Sessions.Open(r.Context(), frontend.OpenRequest{Protocol: i.protocol, PlanID: plan.ID, Viewer: v, Device: dev})
 		if err != nil {
+			if channel != "" {
+				i.liveTuneError(w, err)
+				return
+			}
 			if !jellyfinStaticFallback(err) || !staticPlayable {
 				if i.protocol == "jellyfin" {
 					i.playbackInfoError(w, "open", err)
@@ -704,12 +708,12 @@ func (i *instance) liveStreamsOpen(w http.ResponseWriter, r *http.Request) {
 	intent := frontend.PlayIntent{Options: opts, AllowTranscoding: &allowed}
 	plan, err := i.host.Sessions.Plan(r.Context(), frontend.PlanRequest{Viewer: v, Device: dev, Protocol: i.protocol, Channel: channel, Caps: capability.Client, Intent: intent})
 	if err != nil {
-		http.Error(w, "Playback unavailable", 503)
+		i.liveTuneError(w, err)
 		return
 	}
 	session, err := i.host.Sessions.Open(r.Context(), frontend.OpenRequest{Protocol: i.protocol, PlanID: plan.ID, Viewer: v, Device: dev})
 	if err != nil {
-		http.Error(w, "Playback unavailable", 503)
+		i.liveTuneError(w, err)
 		return
 	}
 	url, err := i.host.Sessions.StartStream(r.Context(), frontend.SessionAccess{Viewer: v, Device: dev, Protocol: i.protocol}, session.ID, frontend.StreamRequest{Format: frontend.StreamHLS})
@@ -1330,4 +1334,17 @@ func (i *instance) streamAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	i.serveAliasSession(w, r, access, sessions, sessionID, versionScope, version, detailSource, format)
+}
+
+// Both MediaBrowser dialects resolve tune failures with a native playback code.
+func (i *instance) liveTuneError(w http.ResponseWriter, err error) {
+	detail := frontend.DiagnoseLiveTV("tune", err)
+	code := "NoCompatibleStream"
+	if errors.Is(err, frontend.ErrUnauthorized) {
+		code = "NotAllowed"
+	} else if errors.Is(err, frontend.ErrStreamLimit) {
+		code = "RateLimitExceeded"
+	}
+	w.Header().Set("X-Ether-LiveTV-Error", detail.Code)
+	jsonReply(w, map[string]any{"MediaSources": []any{}, "PlaySessionId": "", "ErrorCode": code, "Message": detail.Message, "LiveTVErrorCode": detail.Code})
 }

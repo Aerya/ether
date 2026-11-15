@@ -195,7 +195,12 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	}
 	s, e := i.host.Sessions.Open(r.Context(), frontend.OpenRequest{Protocol: "vela", PlanID: plan.ID, Viewer: v, Device: requestDevice(r)})
 	if e != nil {
-		fail(w, e, r)
+		if b.ChannelID != "" {
+			detail := frontend.DiagnoseLiveTV("tune", e)
+			send(w, 503, object{"error": object{"class": "source", "code": detail.Code, "message": detail.Message, "retry": object{"allowed": false}}})
+		} else {
+			fail(w, e, r)
+		}
 		return
 	}
 	if b.ChannelID != "" && s.Media != nil && !s.Media.Estimated {

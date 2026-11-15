@@ -389,7 +389,11 @@ func (s *Service) startBroadcast(ctx context.Context, ss *session) error {
 			format, full = running.format, running.steadyBitrate
 		} else {
 			var code, detail string
-			admitted, code, detail = s.admitSteady(ctx, c)
+			var admissionErr error
+			admitted, code, detail, admissionErr = s.admitSteady(ctx, c)
+			if admissionErr != nil {
+				return admissionErr
+			}
 			if code != "" {
 				s.sessionLog(ss).Info("live playback path selected", "path", "direct", "reason", code, "detail", detail)
 				ss.mu.Lock()
@@ -446,6 +450,13 @@ func (s *Service) startBroadcast(ctx context.Context, ss *session) error {
 	ss.broadcast = lease
 	ss.info.MediaInfo = &info
 	ss.mu.Unlock()
+	if provider, ok := lease.broadcast.planner.(*providerBroadcastPlanner); ok {
+		if err := provider.awaitFirstPicture(ctx); err != nil {
+			lease.close()
+			s.broadcasts.discardCold(lease.broadcast)
+			return err
+		}
+	}
 	awaitBroadcastCushion(ctx, lease, c.Kind == "iptv")
 	return nil
 }
