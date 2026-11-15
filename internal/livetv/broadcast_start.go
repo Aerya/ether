@@ -571,7 +571,7 @@ func steadyRendition(f transcode.RawFormat, full int, caps core.ClientCaps) (int
 }
 
 func (p *scheduleBroadcastPlanner) introPlan(now time.Time) (broadcastPlan, time.Duration) {
-	titleDuration := segmentDuration
+	titleDuration := p.segmentDuration()
 	p.mu.Lock()
 	for _, programme := range p.window {
 		if now.Before(programme.Start) || !now.Before(programme.End) {
@@ -595,9 +595,10 @@ func (p *scheduleBroadcastPlanner) introPlan(now time.Time) (broadcastPlan, time
 		if request.Moment == "tonight" || request.Moment == "upnext" {
 			title := p.momentScreenAt(now)
 			title.id = "intro-" + title.id
-			// Cold and cached titles own the same bounded media interval. Decoder
-			// preparation can delay publication, but cannot lengthen the card.
-			p.joinAt = now.Add(titleDuration)
+			// The unscheduled tune title covers acquisition only. The programme
+			// opens concurrently and takes over on its first decoded picture.
+			title.fill = true
+			p.joinAt = now
 			return title, titleDuration
 		}
 	}

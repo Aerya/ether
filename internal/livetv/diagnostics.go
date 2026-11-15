@@ -154,6 +154,16 @@ func (w *mediaObservation) Write(p []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	n, err := w.ResponseWriter.Write(p)
+	if w.bytes == 0 && n > 0 && err == nil {
+		w.ss.mu.Lock()
+		first := !w.ss.firstMediaByte
+		w.ss.firstMediaByte = true
+		started := w.ss.tuneStartedAt
+		w.ss.mu.Unlock()
+		if first && !started.IsZero() {
+			w.s.sessionLog(w.ss).Debug("live first media byte delivered", "sinceTune", time.Since(started), "requestElapsed", time.Since(w.started))
+		}
+	}
 	w.bytes += n
 	w.writeFailed = w.writeFailed || err != nil
 	return n, err

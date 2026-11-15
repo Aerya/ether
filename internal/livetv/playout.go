@@ -27,6 +27,8 @@ type session struct {
 	inputSource         StreamSource
 	inputHeaders        http.Header
 	firstMediaDelivered bool
+	firstMediaByte      bool
+	tuneStartedAt       time.Time
 	lastMediaWarning    time.Time
 	consumed            bool
 	mediaStarted        bool
@@ -357,6 +359,7 @@ func (s *Service) TuneWithSession(ctx context.Context, u *core.User, channelID s
 	}
 	s.nextSubscription++
 	ss := &session{
+		tuneStartedAt: started,
 		info: SessionInfo{
 			ID: attemptID, SubscriptionID: s.nextSubscription,
 			ActivityID: liveSessionID(), ClientSessionID: clientSessionID,

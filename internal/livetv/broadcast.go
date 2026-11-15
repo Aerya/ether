@@ -439,6 +439,21 @@ func (b *broadcast) addRendition(ctx context.Context, id string, decision core.D
 		r.originErr = err
 		close(r.originDone)
 		b.mu.Unlock()
+		if err != nil {
+			return
+		}
+		last := first
+		for _, count := range []int64{1, 3, 6} {
+			for last.Seq < count-1 {
+				last, err = index.Wait(lifetime, last.Seq)
+				if err != nil {
+					return
+				}
+			}
+			b.logger.Debug("broadcast startup media published", "rendition", id, "segments", last.Seq+1,
+				"elapsed", time.Since(b.created), "mediaDuration", last.Start.Add(last.Duration).Sub(first.Start),
+				"publishedLead", time.Until(last.Start.Add(last.Duration)))
+		}
 	}()
 	return encoder.Segments(), nil
 }
@@ -926,7 +941,7 @@ func (b *broadcast) step(now time.Time) bool {
 	titleOpening := b.intro.element == "tonight" || b.intro.element == "upnext"
 	if titleOpening && !b.airedProgramme && current.programme && !now.Before(b.introUntil) {
 		boundary := (b.tick*int64(b.format.FPSDen)*int64(time.Second))%int64(b.segment*time.Duration(b.format.FPSNum)) == 0
-		if !boundary || b.current == nil || len(b.current.frames) == 0 {
+		if (!b.intro.fill && !boundary) || b.current == nil || len(b.current.frames) == 0 {
 			// Pace title extensions at the live clock; only speculative ticks
 			// wait, never ticks needed to finish a published segment.
 			if now.After(time.Now()) {
@@ -934,9 +949,9 @@ func (b *broadcast) step(now time.Time) bool {
 			}
 			b.introUntil = now.Add(time.Second * time.Duration(b.format.FPSDen) / time.Duration(b.format.FPSNum))
 			introActive = true
-			// Advance the prepared programme behind the extended title so its
-			// first aired picture retains the channel's wall-clock position.
-			if b.current != nil {
+			// Saved exclusive titles keep following the airing clock. Tune fill
+			// retains the prepared picture so it can splice immediately.
+			if !b.intro.fill && b.current != nil {
 				select {
 				case <-b.current.frames:
 				default:
@@ -947,7 +962,7 @@ func (b *broadcast) step(now time.Time) bool {
 	if !now.Before(b.introUntil) && b.introInput != nil {
 		b.finishIntro(now)
 	}
-	if introActive && titleOpening && b.introInput != nil && now.After(time.Now()) {
+	if introActive && titleOpening && !b.intro.fill && b.introInput != nil && now.After(time.Now()) {
 		if source, ok := b.introInput.decoder.(interface{ startupBurstReady() bool }); ok && !source.startupBurstReady() {
 			return false
 		}
@@ -993,7 +1008,7 @@ func (b *broadcast) step(now time.Time) bool {
 					frame.PolicyTags = []any{b.current.policy}
 				}
 				if introActive && b.intro.fill {
-					if b.introFallback || (!b.introShownAt.IsZero() && now.Sub(b.introShownAt) >= time.Second) {
+					if titleOpening || b.introFallback || (!b.introShownAt.IsZero() && now.Sub(b.introShownAt) >= time.Second) {
 						b.finishIntro(now)
 						introActive = false
 					}
@@ -1006,7 +1021,7 @@ func (b *broadcast) step(now time.Time) bool {
 					source.Aired(frame)
 				}
 				if b.current.lastFrameAt.IsZero() && current.programme {
-					b.logger.Debug("broadcast programme first aired", "input", current.id, "prepareLatency", now.Sub(b.current.started), "sinceOutputStart", now.Sub(b.origin))
+					b.logger.Debug("broadcast programme first aired", "input", current.id, "prepareLatency", time.Since(b.current.openedAt), "sinceOutputStart", time.Since(b.created), "mediaTime", now.Sub(b.origin))
 					if handoff, ok := b.planner.(interface {
 						noteHandoff(core.RatingKey, time.Duration, time.Time)
 					}); ok {
@@ -1366,7 +1381,7 @@ func (b *broadcast) step(now time.Time) bool {
 	// while a quick decoder gets its first picture. If that cold preparation
 	// takes longer, the ready live screen must fill the playable cushion too;
 	// otherwise the ident can leave an already-playing client at a bare edge.
-	b.burstReady = b.burstReady || (introActive && !b.intro.fill) || (mode == "screen" && frame.Video != nil && time.Since(b.origin) >= 250*time.Millisecond)
+	b.burstReady = b.burstReady || (introActive && (!b.intro.fill || titleOpening)) || (mode == "screen" && frame.Video != nil && time.Since(b.origin) >= 250*time.Millisecond)
 	frame.OutputTime = now
 	if !b.airedProgramme && mode != "screen" && frame.Video != nil {
 		b.coldHoldFrame = frame.Video
@@ -1375,7 +1390,9 @@ func (b *broadcast) step(now time.Time) bool {
 	b.mu.Lock()
 	for id, r := range b.renditions {
 		slow := false
-		if encoder, ok := r.encoder.(interface{ RealtimeSpeed() float64 }); ok {
+		// Priming speed is not sustainable throughput. Startup already bounds
+		// speculative queue depth; due ticks still degrade at real backlog.
+		if encoder, ok := r.encoder.(interface{ RealtimeSpeed() float64 }); ok && !b.bursting {
 			speed := encoder.RealtimeSpeed()
 			slow = speed > 0 && speed < 0.98
 		}

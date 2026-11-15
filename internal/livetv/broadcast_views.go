@@ -15,10 +15,9 @@ import (
 	"github.com/braedonsaunders/ether/internal/transcode"
 )
 
-// awaitBroadcastCushion holds a tune (never a playlist request) until its
-// output has published a first segment and, for a live provider output, one
-// whole target duration: a client then starts with a segment of cushion and
-// its first playlist answers at once.
+// awaitBroadcastCushion prefers three target durations for virtual
+// channels and two target durations for providers. Only tune waits, with a
+// bounded budget; the first playlist never waits for this cushion.
 func awaitBroadcastCushion(ctx context.Context, lease *broadcastLease, provider bool) {
 	index, err := lease.output()
 	if err != nil {
@@ -26,6 +25,13 @@ func awaitBroadcastCushion(ctx context.Context, lease *broadcastLease, provider 
 	}
 	segment := broadcastSegment(lease)
 	limit := 6 * time.Second
+	targets := 2
+	if !provider {
+		// Prefer AVPlayer's three-target startup buffer at tune time.
+		// Playlist handlers never wait for this cushion.
+		limit = 3 * time.Second
+		targets = 3
+	}
 	if deadline, ok := ctx.Deadline(); ok {
 		limit = min(limit, time.Until(deadline)-500*time.Millisecond)
 	}
@@ -46,7 +52,7 @@ func awaitBroadcastCushion(ctx context.Context, lease *broadcastLease, provider 
 	// published up to a second late costs nothing; no opening cut of the
 	// ladder is longer than that lead (continuousLadder).
 	first := index.Since(-1, 1)
-	for provider && len(first) > 0 && latest.Start.Add(latest.Duration).Sub(first[0].Start) < segment*2 {
+	for len(first) > 0 && latest.Start.Add(latest.Duration).Sub(first[0].Start) < segment*time.Duration(targets) {
 		if latest, err = index.Wait(wait, latest.Seq); err != nil {
 			return
 		}
