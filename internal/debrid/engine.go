@@ -335,7 +335,7 @@ func (e *Engine) Open(ctx context.Context, releaseID string, payload []byte) (co
 	if err != nil {
 		return nil, err
 	}
-	s := &httpSource{f: f, last: -2}
+	s := &httpSource{f: f, last: -2, priority: func() bool { return callerUrgent(ctx) }}
 	s.raCtx, s.raCancel = context.WithCancel(f.ctx)
 	return s, nil
 }
@@ -544,11 +544,12 @@ const (
 )
 
 type blockFlight struct {
-	done  chan struct{}
-	data  []byte
-	err   error
-	mode  fetchMode
-	first int64 // run start; urgent readers steal later blocks of a prefetch run
+	done   chan struct{}
+	data   []byte
+	err    error
+	mode   fetchMode
+	first  int64        // run start; urgent readers steal later blocks of a prefetch run
+	demand *atomic.Bool // shared by the run: a viewer joined its queued range
 }
 
 type remoteFile struct {
@@ -1161,7 +1162,10 @@ func (f *remoteFile) block(ctx context.Context, idx int64, mode fetchMode, runBl
 					runCtx = f.ctx
 				}
 			}
-			fl, _ = f.startRun(runCtx, idx, runBlocks, mode, false)
+			fl, _ = f.startRun(inheritReadPriority(runCtx, ctx), idx, runBlocks, mode, false)
+		}
+		if fl.demand != nil && mode == fetchUrgent && callerUrgent(ctx) {
+			fl.demand.Store(true)
 		}
 		select {
 		case <-fl.done:
@@ -1199,11 +1203,12 @@ func (f *remoteFile) startRun(ctx context.Context, idx, n int64, mode fetchMode,
 		return fl, false
 	}
 	var fls []*blockFlight
+	demand := new(atomic.Bool)
 	for i := idx; i < idx+max(n, 1) && i < f.nblocks; i++ {
 		if i > idx && f.presentLocked(i) {
 			break
 		}
-		fl := &blockFlight{done: make(chan struct{}), mode: mode, first: idx}
+		fl := &blockFlight{done: make(chan struct{}), mode: mode, first: idx, demand: demand}
 		f.flights[i] = fl
 		fls = append(fls, fl)
 	}
@@ -1232,15 +1237,18 @@ func (f *remoteFile) finish(idx int64, fl *blockFlight, data []byte, err error, 
 // publishing each block as soon as its bytes arrive.
 func (f *remoteFile) fetchRun(ctx context.Context, first int64, fls []*blockFlight, mode fetchMode, slotHeld bool) {
 	// reqCtx ends when the run is abandoned; httpCtx carries its request.
-	// They differ for background runs, which keep a nearly finished
-	// response going so its connection survives the seek that displaced it.
+	// A nearly finished response may complete into the existing cache after
+	// an early client close or a seek, within the same bounded drain budget.
 	reqCtx, httpCtx := ctx, ctx
 	var remaining atomic.Int64 // response bytes still unread; -1 before the body
 	remaining.Store(-1)
-	if mode == fetchReadAhead || mode == fetchPrefetch {
-		var stop, cancelHTTP context.CancelFunc
-		reqCtx, stop = f.yieldCtx(ctx)
-		defer stop()
+	if mode == fetchReadAhead || mode == fetchPrefetch || mode == fetchUrgent {
+		var cancelHTTP context.CancelFunc
+		if mode != fetchUrgent {
+			var stop context.CancelFunc
+			reqCtx, stop = f.yieldCtx(ctx)
+			defer stop()
+		}
 		httpCtx, cancelHTTP = context.WithCancel(context.WithoutCancel(ctx))
 		finished := make(chan struct{})
 		defer cancelHTTP()
@@ -1248,6 +1256,7 @@ func (f *remoteFile) fetchRun(ctx context.Context, first int64, fls []*blockFlig
 		go f.keepWarmOnYield(reqCtx, finished, &remaining, cancelHTTP)
 	}
 	httpCtx = context.WithValue(httpCtx, fetchModeKey{}, mode)
+	httpCtx = context.WithValue(httpCtx, playheadDemandKey{}, fls[0].demand)
 	i := 0
 	fail := func(err error) {
 		if reqCtx.Err() != nil {
@@ -1395,14 +1404,29 @@ const (
 
 type fetchModeKey struct{}
 
-// gateUrgent reports whether a viewer is waiting on the request ctx carries:
-// a foreground read that is not, or is no longer, a warm-up or analysis.
+// readPriorityKey carries caller admission through workers detached from a
+// request's cancellation. The callback preserves warm-up promotion to Play.
+type readPriorityKey struct{}
+type playheadDemandKey struct{}
+
+func callerUrgent(ctx context.Context) bool {
+	if priority, ok := ctx.Value(readPriorityKey{}).(func() bool); ok {
+		return priority()
+	}
+	return !core.SpeculativeIndexerWork(ctx) && !core.IsBackgroundCheck(ctx) && !isAnalysisRead(ctx)
+}
+
+func inheritReadPriority(dst, src context.Context) context.Context {
+	return context.WithValue(dst, readPriorityKey{}, func() bool { return callerUrgent(src) })
+}
+
+// gateUrgent distinguishes playhead/probe reads from speculative ranges.
 func gateUrgent(ctx context.Context) bool {
-	mode, ok := ctx.Value(fetchModeKey{}).(fetchMode)
-	if !ok {
+	if demand, _ := ctx.Value(playheadDemandKey{}).(*atomic.Bool); demand != nil && demand.Load() {
 		return true
 	}
-	return (mode == fetchUrgent || mode == fetchDurable || mode == fetchMetadata) && !core.IsSpeculative(ctx) && !isAnalysisRead(ctx)
+	mode, ok := ctx.Value(fetchModeKey{}).(fetchMode)
+	return (!ok || mode == fetchUrgent || mode == fetchDurable || mode == fetchMetadata) && callerUrgent(ctx)
 }
 
 func (f *remoteFile) yieldDrainBytes() int64 {
@@ -1412,7 +1436,7 @@ func (f *remoteFile) yieldDrainBytes() int64 {
 	return min(int64(maxYieldDrainBytes), max(int64(minYieldDrainBytes), int64(tput/4)))
 }
 
-// keepWarmOnYield ends an abandoned background run's request, unless only a
+// keepWarmOnYield ends an abandoned run's request, unless only a
 // short remainder is left: that is read to the end (and published), so the
 // connection goes back to the pool instead of being torn down mid-response.
 func (f *remoteFile) keepWarmOnYield(abandoned context.Context, finished <-chan struct{}, remaining *atomic.Int64, cancel context.CancelFunc) {
@@ -1519,6 +1543,13 @@ type timing struct{ connect, ttfb time.Duration }
 // core.ErrArticleMissing (the link keeps failing) or core.ErrArticleCorrupt
 // (the file is not what the payload describes).
 func (f *remoteFile) rangeGet(ctx context.Context, start, end int64, urgent bool) (result io.ReadCloser, measured timing, served servedBy, resultErr error) {
+	if _, ok := ctx.Value(fetchModeKey{}).(fetchMode); !ok {
+		mode := fetchPrefetch
+		if urgent {
+			mode = fetchUrgent
+		}
+		ctx = context.WithValue(ctx, fetchModeKey{}, mode)
+	}
 	if isAnalysisRead(ctx) && f.e.svc != nil {
 		totals := &f.e.svc.analysisTotals
 		totals.active.Add(1)
@@ -1835,7 +1866,7 @@ func (e *Engine) get(ctx context.Context, u string, start, end int64, urgent boo
 		<-slots
 		return nil, timing{}, err
 	}
-	if !urgent || e.delay < 0 {
+	if !urgent || !priority() || e.delay < 0 {
 		return send(ctx, e.hc, nil, host)
 	}
 	type result struct {
@@ -2183,7 +2214,8 @@ type httpSource struct {
 	f *remoteFile
 
 	mu       sync.Mutex
-	last     int64 // last block a live read touched
+	last     int64       // last block a live read touched
+	priority func() bool // source-open role, including a promotable warm-up
 	raCtx    context.Context
 	raCancel context.CancelFunc
 	closed   bool
@@ -2248,6 +2280,9 @@ func (s *httpSource) Close() error {
 func (s *httpSource) ReadAt(p []byte, off int64) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), readAtDefaultBudget)
 	defer cancel()
+	if s.priority != nil {
+		ctx = context.WithValue(ctx, readPriorityKey{}, s.priority)
+	}
 	return s.read(ctx, p, off, fetchUrgent, true)
 }
 

@@ -30,11 +30,12 @@ type connCap struct {
 	nextDial map[string]time.Time
 	dialGap  time.Duration
 	reduced  map[string]time.Time // addr -> end of its reduced-cap cooldown
-	freed    chan struct{}        // closed and replaced whenever a connection closes
+	freed    chan struct{}        // closed and replaced whenever admission changes
+	waiters  map[string][]*dialWaiter
 }
 
 func newConnCap(limit int) *connCap {
-	return &connCap{limit: limit, now: time.Now, open: map[string]int{}, nextDial: map[string]time.Time{}, reduced: map[string]time.Time{}, freed: make(chan struct{})}
+	return &connCap{limit: limit, now: time.Now, open: map[string]int{}, nextDial: map[string]time.Time{}, reduced: map[string]time.Time{}, freed: make(chan struct{}), waiters: map[string][]*dialWaiter{}}
 }
 
 // limitLocked is addr's effective cap and, while it is reduced, when the
@@ -86,7 +87,34 @@ func (c *connCap) wrap(next dialFunc) dialFunc {
 	}
 }
 
+type dialWaiter struct {
+	urgent func() bool
+}
+
+// Equal-priority dials keep FIFO order. Background dials resume as soon as
+// the foreground queue drains; already-open connections are never displaced.
 func (c *connCap) acquire(ctx context.Context, addr string) error {
+	w := &dialWaiter{urgent: func() bool { return gateUrgent(ctx) }}
+	c.mu.Lock()
+	c.waiters[addr] = append(c.waiters[addr], w)
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		q := c.waiters[addr]
+		for i, other := range q {
+			if other == w {
+				q = append(q[:i], q[i+1:]...)
+				break
+			}
+		}
+		if len(q) == 0 {
+			delete(c.waiters, addr)
+		} else {
+			c.waiters[addr] = q
+		}
+		c.signalLocked()
+		c.mu.Unlock()
+	}()
 	asked := false
 	began := time.Now()
 	lim := c.limit
@@ -97,9 +125,21 @@ func (c *connCap) acquire(ctx context.Context, addr string) error {
 	}()
 	for {
 		c.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			c.mu.Unlock()
+			return err
+		}
 		var until time.Time
 		lim, until = c.limitLocked(addr)
-		if c.open[addr] < lim {
+		q := c.waiters[addr]
+		pick := q[0]
+		for _, candidate := range q {
+			if candidate.urgent() {
+				pick = candidate
+				break
+			}
+		}
+		if c.open[addr] < lim && pick == w {
 			wait := c.nextDial[addr].Sub(c.now())
 			if wait <= 0 {
 				c.open[addr]++
@@ -155,9 +195,13 @@ func (c *connCap) release(addr string) {
 	} else {
 		c.open[addr]--
 	}
+	c.signalLocked()
+	c.mu.Unlock()
+}
+
+func (c *connCap) signalLocked() {
 	close(c.freed)
 	c.freed = make(chan struct{})
-	c.mu.Unlock()
 }
 
 // Reserve headroom for real reads, including connections in both pools.
@@ -224,13 +268,18 @@ func (g *hostGate) acquire(ctx context.Context, addr string, urgent func() bool)
 	began := time.Now()
 	g.mu.Lock()
 	lim, until := g.limit(addr)
-	if g.busy[addr] < lim && (len(g.waiters[addr]) == 0 || urgent()) {
+	if err := ctx.Err(); err != nil {
+		g.mu.Unlock()
+		return nil, err
+	}
+	if g.busy[addr] < lim && len(g.waiters[addr]) == 0 {
 		g.busy[addr]++
 		g.mu.Unlock()
 		return g.releaser(addr), nil
 	}
 	w := &gateWaiter{urgent: urgent, ready: make(chan struct{})}
 	g.waiters[addr] = append(g.waiters[addr], w)
+	g.dispatchLocked(addr)
 	g.mu.Unlock()
 	defer func() {
 		if wait := time.Since(began); wait > 250*time.Millisecond && g.log != nil {

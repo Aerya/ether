@@ -406,7 +406,7 @@ func (p *Prefetcher) runJob(j job) {
 	ctx, cancel := context.WithTimeout(p.ctx, p.opts.JobTimeout)
 	var err error
 	if cfg := p.config(); !cfg.DisableSpeculation && cfg.Mode != "off" {
-		err = j.run(ctx)
+		err = j.run(core.WithUnattendedSearch(ctx))
 	}
 	cancel()
 
