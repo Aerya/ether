@@ -904,13 +904,12 @@ func (s *Service) serveOwnedPlaylist(w http.ResponseWriter, r *http.Request, ss 
 		return
 	}
 	// Include the source target for passthrough inputs with longer segments.
-	// A short initial backlog may wait 1.5 targets before publication. Give
-	// that bounded startup grace time to finish, including ingest and the
-	// publication tick, rather than rejecting media already in hand.
+	// AVPlayer can hang the item permanently when its first playlist takes
+	// a whole target duration. Keep the wait below that, including startup.
 	lease.tl.mu.Lock()
 	target := max(lease.tl.target, lease.tl.targetFloor, s.latencyPolicy().SegmentDuration())
 	lease.tl.mu.Unlock()
-	ctx, cancel := context.WithTimeout(r.Context(), max(2*time.Second, 2*target))
+	ctx, cancel := context.WithTimeout(r.Context(), target/2)
 	defer cancel()
 	err := lease.tl.waitStarted(ctx)
 	if errors.Is(err, errNeedsRelay) {

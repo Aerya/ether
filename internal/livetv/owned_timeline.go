@@ -305,10 +305,13 @@ func (t *ownedTimeline) tickLocked(now time.Time) {
 		if len(t.pending) == 0 {
 			return
 		}
-		// Wait for the start segments, or the media they stand for (a
-		// long first segment), bounded so a short backlog still starts.
+		// Prefer the start segments, or the media they stand for (a long
+		// first segment), but release a short backlog after at most one tick.
+		// The first playlist has a half-target response deadline: AVPlayer
+		// can hang permanently if it waits a whole target. Leave room for
+		// ingest and the next publication tick, even with a one-second target.
 		enough := len(t.pending) >= t.startSegs || t.startMedia > 0 && t.depthLocked() >= t.startMedia
-		if !enough && now.Sub(t.firstAt) < max(2*time.Second, t.targetFloor*3/2) {
+		if !enough && now.Sub(t.firstAt) < min(ownedTick, t.targetFloor/4) {
 			return
 		}
 		// The target covers the source's own target and every segment
