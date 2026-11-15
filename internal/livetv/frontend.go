@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/braedonsaunders/ether/internal/core"
@@ -328,6 +329,45 @@ func (h liveTVHost) GuideWindow(ctx context.Context, u *frontend.User, from, unt
 
 func (h liveTVHost) GuideChannelLogo(ctx context.Context, c frontend.LiveTVChannel) string {
 	return h.s.GuideChannelLogo(ctx, FromFrontendChannel(c))
+}
+
+func (h liveTVHost) SourceHubGroups(ctx context.Context) ([]frontend.LiveSourceHubGroup, error) {
+	srcs, err := h.s.Sources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []frontend.LiveSourceHubGroup
+	for _, src := range srcs {
+		if !src.HubGroups || len(src.Groups) == 0 {
+			continue
+		}
+		byKey := make(map[string]SourceGroup, len(src.Groups))
+		var included []SourceGroup
+		for _, g := range src.Groups {
+			if g.Excluded || strings.TrimSpace(g.Name) == "" {
+				continue
+			}
+			key := strings.ToLower(strings.TrimSpace(g.Name))
+			byKey[key] = g
+			included = append(included, g)
+		}
+		seen := make(map[string]bool, len(included))
+		for _, name := range src.GroupOrder {
+			key := strings.ToLower(strings.TrimSpace(name))
+			if g, ok := byKey[key]; ok && !seen[key] {
+				seen[key] = true
+				out = append(out, frontend.LiveSourceHubGroup{SourceID: src.ID, Group: g.Name})
+			}
+		}
+		for _, g := range included {
+			key := strings.ToLower(strings.TrimSpace(g.Name))
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, frontend.LiveSourceHubGroup{SourceID: src.ID, Group: g.Name})
+			}
+		}
+	}
+	return out, nil
 }
 
 func (h liveTVHost) TuneWithSession(ctx context.Context, u *frontend.User, id string, caps frontend.ClientCaps, sessionID string) (frontend.LiveTVSessionInfo, error) {

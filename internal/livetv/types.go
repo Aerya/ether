@@ -286,6 +286,8 @@ type Source struct {
 	// order and numbers; otherwise channels are numbered 1… down the
 	// listed groups (unlisted groups follow in provider order).
 	GroupOrder []string `json:"groupOrder,omitempty"`
+	// HubGroups adds each included channel group as a What's On shelf in Plex.
+	HubGroups bool `json:"hubGroups,omitempty"`
 
 	// Provider etiquette for the source's streams. MaxConnections caps
 	// simultaneous provider connections below what the panel allows (0 uses

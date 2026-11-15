@@ -255,6 +255,8 @@ export type GroupRules = {
   hideAdult?: boolean;
   /** Empty: the provider's order and numbers. Otherwise channels are numbered 1… down this group order. */
   groupOrder?: string[];
+  /** Show each included channel group as a What's On shelf in Plex. */
+  hubGroups?: boolean;
 };
 /** How gently Ether uses a provider's streams (see SourceLimits). */
 export type SourceLimitRules = {

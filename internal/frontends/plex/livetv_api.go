@@ -1015,6 +1015,64 @@ func (s *Server) liveCategoryHubs(r *http.Request) []model.Hub {
 			out = append(out, h)
 		}
 	}
+	if hg, ok := s.svc().liveTV.(frontend.LiveTVSourceHubGroups); ok {
+		if groups, err := hg.SourceHubGroups(r.Context()); err == nil && len(groups) > 0 {
+			type groupKey struct {
+				sourceID string
+				group    string
+			}
+			buckets := make(map[groupKey][]model.Metadata, len(groups))
+			wanted := make(map[groupKey]bool, len(groups))
+			for _, g := range groups {
+				wanted[groupKey{g.SourceID, strings.ToLower(strings.TrimSpace(g.Group))}] = true
+			}
+			groupSeen := make(map[groupKey]map[string]bool, len(groups))
+			for _, p := range ps {
+				c, ok := byID[p.ChannelID]
+				if !ok || strings.TrimSpace(c.Group) == "" {
+					continue
+				}
+				gk := groupKey{c.SourceID, strings.ToLower(strings.TrimSpace(c.Group))}
+				if !wanted[gk] || len(buckets[gk]) >= maxItems {
+					continue
+				}
+				dedupKey := p.ChannelID + "|" + p.Item.Title
+				if groupSeen[gk] == nil {
+					groupSeen[gk] = make(map[string]bool)
+				}
+				if groupSeen[gk][dedupKey] {
+					continue
+				}
+				if md, ok := toMeta(p); ok {
+					groupSeen[gk][dedupKey] = true
+					buckets[gk] = append(buckets[gk], md)
+				}
+			}
+			for i, g := range groups {
+				gk := groupKey{g.SourceID, strings.ToLower(strings.TrimSpace(g.Group))}
+				items := buckets[gk]
+				if len(items) == 0 {
+					continue
+				}
+				slug := strings.Map(func(r rune) rune {
+					if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+						return r
+					}
+					if r >= 'A' && r <= 'Z' {
+						return r + ('a' - 'A')
+					}
+					return '-'
+				}, g.Group)
+				slug = strings.Trim(slug, "-")
+				if slug == "" {
+					slug = strconv.Itoa(i + 1)
+				}
+				if h, ok := makeHub(liveProviderPath+"/watchnow/all", g.Group, "livetv.group."+slug, items); ok {
+					out = append(out, h)
+				}
+			}
+		}
+	}
 	return out
 }
 func (s *Server) liveSessionMetadata(info frontend.LiveTVSessionInfo) model.Metadata {
