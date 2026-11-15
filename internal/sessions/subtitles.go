@@ -111,9 +111,16 @@ func (b *Broker) serveSubtitle(w http.ResponseWriter, r *http.Request, s *broker
 		http.NotFound(w, r)
 		return
 	}
-	if r.URL.Query().Get("ether_window") == "1" && format == "vtt" && b.progressiveSubtitle(s, ps.Info, stream) {
-		b.serveSubtitleWindow(w, r, s, stream)
-		return
+	if r.URL.Query().Get("ether_window") == "1" && format == "vtt" {
+		if b.progressiveSubtitle(s, ps.Info, stream) {
+			// A window is a growing view of the live cue tee.
+			w.Header().Set("X-Ether-Subtitle-Complete", "0")
+			b.serveSubtitleWindow(w, r, s, stream)
+			return
+		}
+		// Cached and sidecar tracks answer a window request with the whole
+		// track, so the client can stop polling.
+		w.Header().Set("X-Ether-Subtitle-Complete", "1")
 	}
 	if r.URL.Query().Get("ether_stream") == "1" && (format == "js" || format == "vtt") && b.progressiveSubtitle(s, ps.Info, stream) {
 		b.serveProgressiveSubtitle(w, r, s, stream)
