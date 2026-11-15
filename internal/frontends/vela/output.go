@@ -12,9 +12,10 @@ import (
 // refreshOutput reads only existing sessions. Codec claims come from real init
 // bytes; planned and unused rungs never start work. Caller holds s.mu.
 func (i *instance) refreshOutput(ctx context.Context, id string, s *playSession) bool {
+	liveChanged := i.refreshLiveWindow(ctx, id, s)
 	hs, ok := i.host.Sessions.TranscodeFor(ctx, id)
 	if !ok || hs == nil {
-		return false
+		return liveChanged
 	}
 	paths, _ := s.plan["paths"].([]object)
 	before, _ := json.Marshal(object{"paths": paths, "preparation": s.plan["preparation"]})
@@ -76,5 +77,27 @@ func (i *instance) refreshOutput(ctx context.Context, id string, s *playSession)
 		s.plan["preparation"] = object{"sourceGeneration": s.source, "seekGeneration": s.seek, "events": events}
 	}
 	after, _ := json.Marshal(object{"paths": paths, "preparation": s.plan["preparation"]})
+	return liveChanged || string(before) != string(after)
+}
+
+// refreshLiveWindow never opens an output. The playlist response headers remain
+// authoritative when publication advances between this read and the fetch.
+func (i *instance) refreshLiveWindow(ctx context.Context, id string, s *playSession) bool {
+	live, ok := s.plan["live"].(object)
+	if !ok {
+		return false
+	}
+	before, _ := json.Marshal(live)
+	delete(live, "anchor")
+	delete(live, "windowStartSeconds")
+	delete(live, "liveEdgeSeconds")
+	if reader, ok := i.host.Sessions.(frontend.LiveWindowReader); ok {
+		if window, err := reader.LiveWindow(ctx, id); err == nil && window.Anchor.MediaSequence >= 0 && window.Anchor.MediaSequence <= 1<<53-1 {
+			live["anchor"] = window.Anchor
+			live["windowStartSeconds"] = window.Anchor.WindowStartSeconds
+			live["liveEdgeSeconds"] = window.LiveEdgeSeconds
+		}
+	}
+	after, _ := json.Marshal(live)
 	return string(before) != string(after)
 }

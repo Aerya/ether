@@ -833,3 +833,10 @@ func (s surface) QualityLimitations(ctx context.Context, a frontend.SessionAcces
 	}
 	return q.QualityLimitations(ctx, a, id)
 }
+
+func (s surface) LiveWindow(ctx context.Context, id string) (frontend.LiveWindow, error) {
+	if reader, ok := s.broker.(frontend.LiveWindowReader); ok {
+		return reader.LiveWindow(ctx, id)
+	}
+	return frontend.LiveWindow{}, core.ErrNotAvailable
+}

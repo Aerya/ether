@@ -503,3 +503,10 @@ func (s scorecardSessionWrapper) ExtraPlayback(ctx context.Context, r frontend.T
 	}
 	return frontend.TrailerPreviewResult{State: "unavailable", Reason: "unsupported"}, nil
 }
+
+func (s scorecardSessionWrapper) LiveWindow(ctx context.Context, id string) (frontend.LiveWindow, error) {
+	if reader, ok := s.embeddedScorecardSessions.(frontend.LiveWindowReader); ok {
+		return reader.LiveWindow(ctx, id)
+	}
+	return frontend.LiveWindow{}, core.ErrNotAvailable
+}
