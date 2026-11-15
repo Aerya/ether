@@ -33,7 +33,6 @@ import (
 
 	"github.com/braedonsaunders/ether/internal/config"
 	"github.com/braedonsaunders/ether/internal/core"
-	"github.com/braedonsaunders/ether/internal/langtag"
 	"github.com/braedonsaunders/ether/internal/logredact"
 )
 
@@ -56,11 +55,15 @@ func (s *Service) subdlEnabled() bool {
 // subdlQuery builds the SubDL search params for a title + language.
 // SubDL filters on base ISO 639-1 codes, so a regional variant is reduced
 // to its primary subtag (see subdlQueryLang).
-func subdlQuery(title *core.Title, lang string) url.Values {
+func subdlQuery(title *core.Title, lang, releaseName string) url.Values {
 	q := url.Values{}
 	q.Set("client", subdlClient)
+	q.Set("releases", "1")
+	if releaseName != "" {
+		q.Set("file_name", releaseName)
+	}
 	q.Set("subs_per_page", strconv.Itoa(subdlMaxResults))
-	q.Set("languages", strings.ToUpper(subdlQueryLang(lang)))
+	q.Set("languages", providerLanguages(lang, func(l string) string { return strings.ToUpper(subdlQueryLang(l)) }))
 	switch title.Type {
 	case core.TypeEpisode:
 		q.Set("type", "tv")
@@ -108,7 +111,10 @@ func subdlQuery(title *core.Title, lang string) url.Values {
 // SubDL filters on base ISO 639-1 codes, so a regional variant (pt-br,
 // zh-cn) is reduced to its primary subtag.
 func subdlQueryLang(l string) string {
-	n := langtag.Normalize(l)
+	n := searchLanguage(l)
+	if n == "nb" {
+		return "no"
+	}
 	if base, _, ok := strings.Cut(n, "-"); ok {
 		return base
 	}
@@ -119,11 +125,14 @@ type subdlResponse struct {
 	Status    bool   `json:"status"`
 	Error     string `json:"error"`
 	Subtitles []struct {
-		ReleaseName string `json:"release_name"`
-		Name        string `json:"name"`
-		URL         string `json:"url"`
-		HI          bool   `json:"hi"`
-		FullSeason  bool   `json:"full_season"`
+		ReleaseName  string   `json:"release_name"`
+		Name         string   `json:"name"`
+		URL          string   `json:"url"`
+		Language     string   `json:"language"`
+		LanguageCode string   `json:"language_code"`
+		Releases     []string `json:"releases"`
+		HI           bool     `json:"hi"`
+		FullSeason   bool     `json:"full_season"`
 	} `json:"subtitles"`
 }
 
@@ -170,12 +179,12 @@ func readSubDLSearch(resp *http.Response) (subdlResponse, error) {
 
 // searchSubDL searches SubDL and maps its results onto Candidates. SubDL
 // has no moviehash parameter, so release-name matching carries ranking.
-func (s *Service) searchSubDL(ctx context.Context, title *core.Title, lang string) ([]Candidate, error) {
+func (s *Service) searchSubDL(ctx context.Context, title *core.Title, lang, releaseName string) ([]Candidate, error) {
 	if title == nil {
 		return nil, fmt.Errorf("nil title")
 	}
-	q := subdlQuery(title, lang)
-	cacheKey := q.Encode()
+	q := subdlQuery(title, lang, releaseName)
+	cacheKey := "subdl:" + q.Encode() + "|" + providerLanguages(lang, func(l string) string { return l })
 	s.mu.Lock()
 	until, missed := s.negative[cacheKey]
 	if missed && !s.now().Before(until) {
@@ -200,7 +209,6 @@ func (s *Service) searchSubDL(ctx context.Context, title *core.Title, lang strin
 	if err != nil {
 		return nil, err
 	}
-	lang = langtag.Normalize(lang)
 	var out []Candidate
 	for _, d := range sr.Subtitles {
 		if d.URL == "" {
@@ -211,6 +219,13 @@ func (s *Service) searchSubDL(ctx context.Context, title *core.Title, lang strin
 		if d.FullSeason && (title.Type == core.TypeEpisode) {
 			continue
 		}
+		actual := searchLanguage(d.LanguageCode)
+		if actual == "" {
+			actual = searchLanguage(d.Language)
+		}
+		if !matchesSearchLanguages(lang, actual) {
+			continue
+		}
 		release := d.ReleaseName
 		if release == "" {
 			release = strings.TrimSuffix(d.Name, ".zip")
@@ -218,8 +233,9 @@ func (s *Service) searchSubDL(ctx context.Context, title *core.Title, lang strin
 		out = append(out, Candidate{
 			FileID:     subdlFileID(d.URL),
 			FileName:   strings.TrimSuffix(d.Name, ".zip"),
-			Language:   lang,
+			Language:   actual,
 			Release:    release,
+			Releases:   d.Releases,
 			HearingImp: d.HI,
 			// SubDL has no uploader-rank or download-count signal; the
 			// release-name token overlap and HI penalty in Rank carry
