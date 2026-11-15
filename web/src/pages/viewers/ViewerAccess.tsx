@@ -1,6 +1,6 @@
 import { ViewerCatalogRules } from "./ViewerCatalogRules";
 import { Button, SearchSelect, SettingsSection, Switch, toast } from "@braedonsaunders/appkit-ui";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ChipGroup, NumberInput } from "../../components/fields";
 import { ErrorPanel, LoadingRows } from "../../components/feedback";
@@ -34,12 +34,23 @@ const HOURS = Array.from({ length: 24 }, (_, h) => ({
 }));
 
 /** A searchable IANA timezone picker; a stored zone the browser lacks stays listed. */
-function TimeZoneSelect({ value, onChange }: { value: string; onChange: (zone: string) => void }) {
-  const options = useMemo(() => {
+function TimeZoneSelect({
+  value,
+  onChange,
+  serverDefault = false,
+}: {
+  value: string;
+  onChange: (zone: string) => void;
+  serverDefault?: boolean;
+}) {
+  const options = (() => {
     const zones = timeZones();
     const list = value && !zones.includes(value) ? [value, ...zones] : zones;
-    return list.map((zone) => ({ value: zone, label: zone.replace(/_/g, " ") }));
-  }, [value]);
+    return [
+      ...(serverDefault ? [{ value: "", label: t("Server time zone") }] : []),
+      ...list.map((zone) => ({ value: zone, label: zone.replace(/_/g, " ") })),
+    ];
+  })();
   return (
     <SearchSelect
       value={value}
@@ -270,6 +281,100 @@ export function ViewerAccess({ viewer }: { viewer: Viewer }) {
                 onChange={(maxContentRating) => patchLimits({ maxContentRating })}
                 isOwner={user.isOwner}
               />
+            ) : null}
+            {user && !user.isOwner ? (
+              <>
+                <SettingsRow
+                  title={t("Bedtime")}
+                  description={t(
+                    "Let the current item finish, then pause playback until wake time.",
+                  )}
+                  control={
+                    <Switch
+                      checked={!!p.bedtime}
+                      onChange={(e) =>
+                        patchPolicy({
+                          bedtime: e.target.checked
+                            ? { time: "20:00", wakeTime: "06:00", timezone: "" }
+                            : null,
+                        })
+                      }
+                      aria-label={t("Bedtime")}
+                    />
+                  }
+                />
+                {p.bedtime ? (
+                  <>
+                    <SettingsRow
+                      title={t("Bedtime starts")}
+                      control={
+                        <input
+                          type="time"
+                          className="rounded border border-border bg-background px-3 py-2"
+                          aria-label={t("Bedtime starts")}
+                          required
+                          value={p.bedtime.time}
+                          onChange={(e) =>
+                            patchPolicy({ bedtime: { ...p.bedtime!, time: e.target.value } })
+                          }
+                        />
+                      }
+                    />
+                    <SettingsRow
+                      title={t("Wake time")}
+                      control={
+                        <input
+                          type="time"
+                          className="rounded border border-border bg-background px-3 py-2"
+                          aria-label={t("Wake time")}
+                          required
+                          value={p.bedtime.wakeTime || "06:00"}
+                          onChange={(e) =>
+                            patchPolicy({ bedtime: { ...p.bedtime!, wakeTime: e.target.value } })
+                          }
+                        />
+                      }
+                    />
+                    <SettingsRow
+                      title={t("Time zone")}
+                      description={t("Leave empty to use the server’s time zone.")}
+                      control={
+                        <div className="w-64">
+                          <TimeZoneSelect
+                            serverDefault
+                            value={p.bedtime.timezone}
+                            onChange={(timezone) =>
+                              patchPolicy({ bedtime: { ...p.bedtime!, timezone } })
+                            }
+                          />
+                        </div>
+                      }
+                    />
+                    <SettingsRow
+                      title={t("Days")}
+                      description={t(
+                        "Choose the days bedtime starts. With no days selected, it applies every day.",
+                      )}
+                      control={
+                        <ChipGroup
+                          ariaLabel={t("Days")}
+                          options={[
+                            { value: 0, label: t("Sunday") },
+                            { value: 1, label: t("Monday") },
+                            { value: 2, label: t("Tuesday") },
+                            { value: 3, label: t("Wednesday") },
+                            { value: 4, label: t("Thursday") },
+                            { value: 5, label: t("Friday") },
+                            { value: 6, label: t("Saturday") },
+                          ]}
+                          value={p.bedtime.days ?? []}
+                          onChange={(days) => patchPolicy({ bedtime: { ...p.bedtime!, days } })}
+                        />
+                      }
+                    />
+                  </>
+                ) : null}
+              </>
             ) : null}
             <SettingsRow
               title={t("Blocked genres")}

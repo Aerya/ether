@@ -57,7 +57,7 @@ func (a *App) buildLiveTV() error {
 			ctx = a.availability.ChannelCheckContext(ctx)
 		}
 		return a.resolver.CheckChannelAvailability(ctx, title)
-	}, Allowed: a.safety.Allowed, CanPlay: a.safety.CanPlay, LogoIndexURL: func() string { return a.cfg.Read().LiveTV.LogoIndexURL }, HealthSweepMinutes: func() int { return a.cfg.Read().LiveTV.HealthSweepMinutes }, Stability: func() string { return a.cfg.Read().LiveTV.Stability }, StreamLimit: func(u *core.User) int { return playback.UserStreamLimit(a.cfg.Read(), a.safety.UserPolicy(u)) }, Warm: func(ctx context.Context, key core.RatingKey, at time.Duration) error {
+	}, Allowed: a.safety.Allowed, CanPlay: a.safety.CanPlay, ConfirmAdmission: a.safety.ConfirmAdmission, LogoIndexURL: func() string { return a.cfg.Read().LiveTV.LogoIndexURL }, HealthSweepMinutes: func() int { return a.cfg.Read().LiveTV.HealthSweepMinutes }, Stability: func() string { return a.cfg.Read().LiveTV.Stability }, StreamLimit: func(u *core.User) int { return playback.UserStreamLimit(a.cfg.Read(), a.safety.UserPolicy(u)) }, Warm: func(ctx context.Context, key core.RatingKey, at time.Duration) error {
 		if !a.registrar.Status().PlexPass {
 			return core.ErrUnauthorized
 		}

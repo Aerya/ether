@@ -402,6 +402,7 @@ type Options struct {
 	Graphics        core.ChannelGraphics
 	GuideProvider   guideprovider.Provider
 
+	ConfirmAdmission   func(context.Context, *core.User, bool, time.Time) (*core.User, error)
 	CanPlay            func(*core.User, bool, time.Time) bool
 	StreamLimit        func(*core.User) int
 	DB                 *sql.DB

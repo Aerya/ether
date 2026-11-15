@@ -128,6 +128,12 @@ func offerJellyfinStatic(source map[string]any, opts frontend.DecideOptions) {
 }
 
 func streamError(protocol frontend.Protocol, w http.ResponseWriter, err error) {
+	var bedtime *frontend.ErrBedtime
+	if errors.As(err, &bedtime) {
+		http.Error(w, bedtime.Error(), http.StatusForbidden)
+		return
+	}
+
 	if errors.Is(err, frontend.ErrNotFound) || errors.Is(err, frontend.ErrNotAvailable) || errors.Is(err, frontend.ErrSourceGone) {
 		if protocol == "jellyfin" {
 			w.Header().Set("Content-Type", "text/plain")
@@ -1136,7 +1142,12 @@ func (i *instance) playbackInfoError(w http.ResponseWriter, stage string, err er
 	} else if errors.Is(err, frontend.ErrStreamLimit) {
 		code = "RateLimitExceeded"
 	}
-	jsonReply(w, map[string]any{"MediaSources": []any{}, "PlaySessionId": "", "ErrorCode": code})
+	body := map[string]any{"MediaSources": []any{}, "PlaySessionId": "", "ErrorCode": code}
+	var bedtime *frontend.ErrBedtime
+	if errors.As(err, &bedtime) {
+		body["Message"] = bedtime.Error()
+	}
+	jsonReply(w, body)
 }
 
 func (i *instance) writeNoCompatibleStream(w http.ResponseWriter) {

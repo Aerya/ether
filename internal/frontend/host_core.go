@@ -125,3 +125,6 @@ func WithSearchCandidates(ctx context.Context, c *SearchCandidates) context.Cont
 func WithSearchListFacts(ctx context.Context) context.Context {
 	return core.WithSearchListFacts(ctx)
 }
+
+// ErrBedtime carries the next playback admission time.
+type ErrBedtime = core.ErrBedtime
