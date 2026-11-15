@@ -419,7 +419,7 @@ func publicMedia(info core.MediaInfo) core.MediaInfo {
 	info.Keyframes = slices.Clone(info.Keyframes)
 	return info
 }
-func (b *Broker) Plan(ctx context.Context, req frontend.PlanRequest) (frontend.PlayPlan, error) {
+func (b *Broker) Plan(ctx context.Context, req frontend.PlanRequest) (planned frontend.PlayPlan, planErr error) {
 	requested := b.deps.Now()
 	req = copyRequest(req)
 	v, err := b.viewer(ctx, req.Viewer)
@@ -671,6 +671,15 @@ func (b *Broker) Plan(ctx context.Context, req frontend.PlanRequest) (frontend.P
 	if ps == nil {
 		return frontend.PlayPlan{}, core.ErrNotAvailable
 	}
+	// Keep the selected source identifiable when delivery negotiation fails.
+	// In particular, an owner pin must explain why it cannot be delivered
+	// without concealing which release was kept instead of substituting one.
+	defer func() {
+		var noPath *frontend.NoCompatiblePathError
+		if errors.As(planErr, &noPath) && ps.Resolution != nil && ps.Resolution.Release.ID != "" {
+			planErr = fmt.Errorf("release %s: %w", ps.Resolution.Release.ID, planErr)
+		}
+	}()
 	if req.Intent.ExactVersion && (ps.Resolution == nil || ps.Resolution.Release.ID != req.Version) {
 		if !existed || previous == nil || previous.ID != ps.ID {
 			b.deps.Playback.Stop(ps.ID)

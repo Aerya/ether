@@ -641,7 +641,7 @@ func (s *Service) Resolve(ctx context.Context, req core.ResolveRequest) (*core.R
 	libProfile := s.libProfileForTitle(ctx, req.Title)
 	req.Client, _ = applyClientRules(q, req.Client, req.User, media, libProfile)
 	profile := SelectProfileForTitle(q, req.Client, req.User, req.Title, libProfile)
-	key := flightKey(req, profile)
+	key := flightKey(req, profile) + "|pin:" + s.PinnedReleaseID(req)
 	if channelAvailabilityCheck(ctx) {
 		key += "/channel-availability"
 	}
@@ -717,13 +717,36 @@ func (s *Service) resolve(ctx context.Context, req core.ResolveRequest, profile 
 	}()
 
 	// The owner's pin for this title, when it applies to this request
-	// (pins.go). It is tried first, like a viewer's Play Version pick.
+	// (pins.go). It is authoritative, including when it cannot be played.
 	pin, pinNote := s.pinForResolve(req)
 	trace.PinStatus = pinNote
 	pinID := ""
 	if pin != nil {
 		pinID = pin.Release.ID
 		trace.Pinned = pinID
+		// A stored pin already has the complete source. Do not search, rescue,
+		// race other releases or return alternates for automatic failover.
+		sreq := s.searchRequest(ctx, t)
+		results := withRelease(nil, pin.Release)
+		cands, _, err := s.rankCandidates(ctx, req, sreq, profile, results, &trace, pinID)
+		if err != nil {
+			trace.Err = err.Error()
+			return nil, err
+		}
+		if autoVersion(req.Prefer) {
+			selector, slotRelease = req.Prefer, pinID
+		}
+		req.Prefer, req.PreferredOnly = pinID, true
+		out, err := s.resolvePreferred(ctx, req, pin, cands, &trace, 1)
+		if err != nil || out.resolution == nil {
+			reason := candidateReason(&trace, pinID)
+			if err == nil {
+				err = core.ErrNotAvailable
+			}
+			trace.Err = fmt.Sprintf("pinned release %s cannot be played: %s", pinID, reason)
+			return nil, fmt.Errorf("%s: %w", trace.Err, err)
+		}
+		return out.resolution, nil
 	}
 
 	ctx, inconclusive := withUnverifiedPool(ctx)
