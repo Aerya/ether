@@ -644,6 +644,8 @@ function durationMs(w: string): number {
 }
 
 export function createFakeServer(opts: FakeOptions = {}) {
+  // Keep the fixture stable when a setup link changes the page's query string.
+  const catalogKeyMissing = new URL(window.location.href).searchParams.has("catalogKey");
   const xtreamGrants = new Map<string, { hash: string; surface: string; lastUsed: number }[]>();
   const catalog = buildCatalog();
   const byKey = new Map(catalog.map((t) => [t.key, t]));
@@ -3730,12 +3732,12 @@ export function createFakeServer(opts: FakeOptions = {}) {
       case "GET /setup/status":
         return json({
           setupComplete: state.config.setupComplete,
-          requiredComplete: true,
+          requiredComplete: !catalogKeyMissing,
           steps: [
             {
               id: "catalog",
               title: "TMDB API key",
-              complete: !new URL(window.location.href).searchParams.has("catalogKey"),
+              complete: !catalogKeyMissing,
               required: true,
             },
           ],
