@@ -395,23 +395,6 @@ func (s *Server) handleLiveChannels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if rawGroup := chi.URLParam(r, "group"); rawGroup != "" {
-		groupName, err := url.PathUnescape(rawGroup)
-		if err != nil {
-			groupName = rawGroup
-		}
-		sourceID, err := url.PathUnescape(chi.URLParam(r, "sourceID"))
-		if err != nil {
-			sourceID = chi.URLParam(r, "sourceID")
-		}
-		filtered := make([]frontend.LiveTVChannel, 0, len(cs))
-		for _, c := range cs {
-			if (sourceID == "" || c.SourceID == sourceID) && strings.EqualFold(strings.TrimSpace(c.Group), strings.TrimSpace(groupName)) {
-				filtered = append(filtered, c)
-			}
-		}
-		cs = filtered
-	}
 	category := chi.URLParam(r, "category")
 	if category == "" {
 		category = strings.TrimSpace(r.URL.Query().Get("genre"))
@@ -620,10 +603,28 @@ func (s *Server) liveGuideMetadataCapture(r *http.Request, captured *[]frontend.
 			return nil, frontend.ErrNotFound
 		}
 	}
+	var groupName, groupSourceID string
+	if rawGroup := chi.URLParam(r, "group"); rawGroup != "" {
+		var err error
+		groupName, err = url.PathUnescape(rawGroup)
+		if err != nil {
+			groupName = rawGroup
+		}
+		groupSourceID, err = url.PathUnescape(chi.URLParam(r, "sourceID"))
+		if err != nil {
+			groupSourceID = chi.URLParam(r, "sourceID")
+		}
+	}
 	out := []model.Metadata{}
 	for _, p := range ps {
 		if category != "" && !matchesLiveCategory(p.Item.Genres, category, p.Item.MediaType) {
 			continue
+		}
+		if groupName != "" {
+			c, ok := byID[p.ChannelID]
+			if !ok || (groupSourceID != "" && c.SourceID != groupSourceID) || !strings.EqualFold(strings.TrimSpace(c.Group), strings.TrimSpace(groupName)) {
+				continue
+			}
 		}
 		if id := chi.URLParam(r, "programme"); id != "" && p.ID != id {
 			continue
