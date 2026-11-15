@@ -12,6 +12,56 @@ import (
 	"strings"
 )
 
+type previewRowArtworkKey struct{}
+
+func withPreviewRowArtwork(r *http.Request, enabled bool) *http.Request {
+	if !enabled {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), previewRowArtworkKey{}, true))
+}
+
+func previewRowArtwork(r *http.Request, item map[string]any) {
+	if len(rankedRowRanks(r)) > 0 {
+		return
+	}
+	if enabled, _ := r.Context().Value(previewRowArtworkKey{}).(bool); !enabled {
+		return
+	}
+	backdrops, _ := item["BackdropImageTags"].([]string)
+	if len(backdrops) == 0 || backdrops[0] == "" {
+		return
+	}
+	tags := map[string]string{}
+	switch old := item["ImageTags"].(type) {
+	case map[string]string:
+		for k, v := range old {
+			tags[k] = v
+		}
+	case map[string]any:
+		for k, v := range old {
+			if value, ok := v.(string); ok {
+				tags[k] = value
+			}
+		}
+	}
+	tags["Primary"] = backdrops[0]
+	item["ImageTags"] = tags
+	item["PrimaryImageAspectRatio"] = float64(16) / 9
+	if old, ok := item["ImageBlurHashes"].(map[string]any); ok {
+		hashes := map[string]any{}
+		for kind, values := range old {
+			if kind != "Primary" {
+				hashes[kind] = values
+			}
+		}
+		if byTag, ok := old["Backdrop"].(map[string]string); ok && byTag[backdrops[0]] != "" {
+			hashes["Primary"] = map[string]string{backdrops[0]: byTag[backdrops[0]]}
+		}
+		item["ImageBlurHashes"] = hashes
+	}
+}
+
 type rankedRowKey struct{}
 
 func withRankedRow(r *http.Request, enabled bool, titles []frontend.Title, offset int) *http.Request {

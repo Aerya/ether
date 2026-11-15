@@ -171,13 +171,13 @@ func (a *App) newSurfaceExperience(protocol core.Protocol, artwork ...frontend.A
 	}}
 	interactions := experience.RowInteractionPolicy{Libraries: libs, Visibility: rowVis, Get: a.catalog.CachedGet, AllowEntry: entryPolicy.Subject, CollectionMembers: func(ctx context.Context, u *core.User, key core.RatingKey, entries []core.NeutralEntryRef) bool {
 		return rowViewCollectionMembers(ctx, a.collections, u, key, entries)
-	}, Impression: a.personalize.RecordNeutralImpression, DetailOpen: a.personalize.RecordDetailOpen}
+	}, Impression: a.personalize.RecordNeutralImpression, EntryImpression: a.personalize.RecordNeutralEntryImpression, DetailOpen: a.personalize.RecordDetailOpen}
 	receipts, err := experience.NewReceipts(experience.ReceiptOptions{DB: a.db, PolicyLease: a.cfg.AcquirePolicy, Active: a.users.PolicyUser, TTL: 30 * time.Minute, MaxPerDevice: 10000, Prefetch: func(ctx context.Context, keys []core.RatingKey) {
 		_, _ = a.catalog.CachedGetMany(ctx, keys)
 	}, Allowed: func(ctx context.Context, u *core.User, _ core.Device, _ core.Protocol, subject experience.ReceiptSubject) bool {
 		return interactions.Allowed(ctx, u, subject)
 	}, AllowedAction: func(_ context.Context, _ *core.User, _ core.Device, _ core.Protocol, subject experience.ReceiptSubject, kind frontend.RowInteractionKind) bool {
-		return ((kind == frontend.RowImpression || kind == frontend.RowPlay) && subject.Kind == "row" && subject.Impression != nil) || (kind == frontend.RowClick && subject.Kind == string(frontend.RowEntryTitle))
+		return interactions.AllowedAction(subject, kind)
 	}, Record: func(ctx context.Context, u *core.User, _ core.Device, _ core.Protocol, subject experience.ReceiptSubject, kind frontend.RowInteractionKind) error {
 		return interactions.Record(ctx, u, subject, kind)
 	}})
@@ -197,7 +197,25 @@ func (a *App) newSurfaceExperience(protocol core.Protocol, artwork ...frontend.A
 		if !ok {
 			return nil, errors.New("experience: missing situation")
 		}
-		return experience.LayoutRows(ctx, a.personalize, libs, req, sit, rows)
+		var layout core.NeutralHomeLayoutSource = a.personalize
+		if req.HomeFallbackOnly {
+			layout = neutralLayoutFunc(a.personalize.FinalizeNeutralHomeFill)
+		}
+		extrasEnabled := a.extras != nil && a.extras.Enabled()
+		rows = append([]frontend.Row(nil), rows...)
+		for n := range rows {
+			if extrasEnabled && (rows[n].Style == "hero" || rows[n].Style == "featured") {
+				rows[n].PreviewOnFocus = true
+			}
+		}
+		arranged, err := experience.LayoutRows(ctx, layout, libs, req, sit, rows)
+		if !extrasEnabled {
+			for n := range arranged {
+				arranged[n].PreviewOnFocus = false
+				arranged[n].Layout.PreviewOnFocus = false
+			}
+		}
+		return arranged, err
 	}, Situation: func(ctx context.Context, req frontend.RowRequest) (core.HomeSituation, error) {
 		v, ok := ctx.Value(experienceSituationKey{}).(core.HomeSituation)
 		if !ok {
@@ -1008,7 +1026,7 @@ func (s *surfaceExperience) cachedRows(ctx context.Context, req frontend.RowRequ
 	// Issued rows mint receipts. A cached success would skip that transaction,
 	// so a later bind failure could not roll back and the client would keep
 	// handles whose receipts were never written. Snapshots are safe to reuse.
-	if issue || (req.Placement != frontend.PlacementHome && req.Placement != frontend.PlacementLibrary) {
+	if issue || req.HomeFallbackOnly || (req.Placement != frontend.PlacementHome && req.Placement != frontend.PlacementLibrary) {
 		return s.loadRows(ctx, req, issue)
 	}
 	key, gen := s.rowCacheKey(req)
@@ -1221,6 +1239,12 @@ func (v stepAsideVibe) VibeCollection(ctx context.Context, user *core.User, quer
 		return c, items, ok, err
 	}
 	return c, v.stepAside.FilterAvailable(core.WithCatalogViewer(ctx, user), items), ok, nil
+}
+
+type neutralLayoutFunc func(context.Context, *core.User, core.HomeSituation, string, []core.NeutralHomeRow) ([]core.NeutralHomeRow, error)
+
+func (f neutralLayoutFunc) FinalizeNeutralHome(ctx context.Context, user *core.User, situation core.HomeSituation, section string, rows []core.NeutralHomeRow) ([]core.NeutralHomeRow, error) {
+	return f(ctx, user, situation, section, rows)
 }
 
 func (v stepAsideVibe) DescriptiveSearchAvailable() bool {

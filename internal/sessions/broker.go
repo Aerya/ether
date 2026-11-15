@@ -27,8 +27,11 @@ import (
 
 // BrokerDeps are the explicit dependencies shared by all protocol surfaces.
 type BrokerDeps struct {
-	PreviewSource func(context.Context, *core.Viewer, *core.Title, string) (PreviewSource, error)
-	SurfacePolicy func(frontend.Protocol) core.SessionPolicy
+	PreviewAvailable func() bool
+	ExtraLookup      func(core.RatingKey) (frontend.Extra, bool)
+	ExtraSource      func(context.Context, *core.Viewer, *core.Title, core.RatingKey, string) (PreviewSource, error)
+	PreviewSource    func(context.Context, *core.Viewer, *core.Title, string) (PreviewSource, error)
+	SurfacePolicy    func(frontend.Protocol) core.SessionPolicy
 	// OnActualPlaying runs in a bounded worker after authenticated playing telemetry.
 	OnActualPlaying func(context.Context, *Broker, PlayingSubtitleSession)
 	// DistributedHLS is opt-in; unsupported plans stay local before reservation.
@@ -111,6 +114,8 @@ type brokerPlan struct {
 }
 type brokerSession struct {
 	observedSourceRevision string
+	audio                  *audioRendition
+	audioGeneration        uint64
 
 	manualSubtitle        bool
 	autoSubtitleIdentity  *int
@@ -170,6 +175,8 @@ type retiredSession struct {
 type Broker struct {
 	previews            map[string]previewSession
 	previewPending      map[int64]bool
+	previewPreparations map[int64]*previewPreparation
+	previewWG           sync.WaitGroup
 	autoSubtitleWG      sync.WaitGroup
 	autoSubtitleRunning int
 	sampleLimit         int
@@ -335,6 +342,14 @@ func clientKey(protocol frontend.Protocol, device core.Device) string {
 	return fmt.Sprintf("%d:%s%s", len(protocol), protocol, device.ID)
 }
 func copyRequest(r frontend.PlanRequest) frontend.PlanRequest {
+	if r.Intent.OriginalPlayback != nil {
+		original := *r.Intent.OriginalPlayback
+		original.DemuxContainers = slices.Clone(original.DemuxContainers)
+		original.VideoDecoders = slices.Clone(original.VideoDecoders)
+		original.AudioDecoders = slices.Clone(original.AudioDecoders)
+		r.Intent.OriginalPlayback = &original
+	}
+
 	if r.Intent.AudioOrdinal != nil {
 		ordinal := *r.Intent.AudioOrdinal
 		r.Intent.AudioOrdinal = &ordinal
@@ -353,6 +368,7 @@ func copyRequest(r frontend.PlanRequest) frontend.PlanRequest {
 	r.Caps.Containers = slices.Clone(r.Caps.Containers)
 	r.Caps.HLSContainers = slices.Clone(r.Caps.HLSContainers)
 	r.Caps.SubtitleCodecs = slices.Clone(r.Caps.SubtitleCodecs)
+	r.Caps.HDRFormats = slices.Clone(r.Caps.HDRFormats)
 	r.Caps.DVProfiles = slices.Clone(r.Caps.DVProfiles)
 	r.Caps.VideoLevels = maps.Clone(r.Caps.VideoLevels)
 	r.Caps.VideoMaxHeights = maps.Clone(r.Caps.VideoMaxHeights)
@@ -697,7 +713,9 @@ func (b *Broker) Plan(ctx context.Context, req frontend.PlanRequest) (frontend.P
 		}
 		req.Intent.Options = selected
 	}
+	sourceChosenAt := b.deps.Now()
 	dec, err := b.decideProfile(ps, req)
+	decisionAt := b.deps.Now()
 	if err != nil {
 		return frontend.PlayPlan{}, err
 	}
@@ -733,7 +751,7 @@ func (b *Broker) Plan(ctx context.Context, req frontend.PlanRequest) (frontend.P
 	b.mu.Unlock()
 	direct, remux, transcoding := b.planAlternatives(ps, req)
 	hls, hlsContainer := b.hlsPlanOutput(ps, req, dec)
-	return frontend.PlayPlan{ID: id, Media: publicMedia(ps.Info), Decision: dec, DirectPlay: direct, DirectStream: remux, Transcoding: transcoding, HLS: hls, HLSContainer: hlsContainer, ETag: etag}, nil
+	return frontend.PlayPlan{SourceChosenAt: sourceChosenAt, DecisionAt: decisionAt, ID: id, Media: publicMedia(ps.Info), Decision: dec, DirectPlay: direct, DirectStream: remux, Transcoding: transcoding, HLS: hls, HLSContainer: hlsContainer, ETag: etag}, nil
 }
 func (b *Broker) Open(ctx context.Context, req frontend.OpenRequest) (frontend.Session, error) {
 	opened := b.deps.Now()
@@ -1058,10 +1076,12 @@ func (b *Broker) Sessions(ctx context.Context, a frontend.SessionAccess) ([]fron
 	b.mu.Lock()
 	liveness, checkLiveness := b.deps.Playback.(interface{ SessionActive(string) bool })
 	var out []frontend.Session
+	isolated := map[string]bool{}
 	b.prunePreviewsLocked()
 	for _, s := range b.previews {
 		if owner || s.public.ViewerID == v.ID {
 			out = append(out, s.public)
+			isolated[s.public.ID] = true
 		}
 	}
 	for _, s := range b.sessions {
@@ -1086,7 +1106,7 @@ func (b *Broker) Sessions(ctx context.Context, a frontend.SessionAccess) ([]fron
 	}
 	visible := out[:0]
 	for i := range out {
-		if out[i].Purpose != "preview" && b.cluster != nil && !b.policy(out[i].Protocol).ExternalAdmission {
+		if !isolated[out[i].ID] && out[i].Purpose != "preview" && b.cluster != nil && !b.policy(out[i].Protocol).ExternalAdmission {
 			active, err := b.cluster.store.current(ctx, out[i].ID)
 			if err != nil {
 				return nil, err
@@ -1421,6 +1441,9 @@ func (b *Broker) Stop(ctx context.Context, a frontend.SessionAccess, id string) 
 	return b.stopLocked(ctx, s)
 }
 func (b *Broker) stopLocked(ctx context.Context, s *brokerSession) error {
+	if err := b.retireAudio(ctx, s); err != nil {
+		return err
+	}
 	if s.autoSubtitleCancel != nil {
 		s.autoSubtitleCancel()
 	}
@@ -1562,6 +1585,10 @@ func (b *Broker) Close(ctx context.Context) {
 		s.cancel()
 	}
 	b.previews = nil
+	for _, job := range b.previewPreparations {
+		job.cancel()
+	}
+	b.previewPreparations = nil
 	if b.historyCancel != nil {
 		b.historyCancel()
 	}
@@ -1592,6 +1619,7 @@ func (b *Broker) Close(ctx context.Context) {
 		cancel()
 	}
 	b.autoSubtitleWG.Wait()
+	b.previewWG.Wait()
 	// Shutdown must still release sessions when its caller has already been
 	// canceled; bound the cleanup so an unresponsive gate cannot block forever.
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), b.shutdownTimeout)

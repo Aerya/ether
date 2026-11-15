@@ -299,18 +299,19 @@ func personalConfigKey(cfg personalHomeConfig) string {
 }
 
 type storedPersonalShelf struct {
-	RankedTop10 bool   `json:"rankedTop10,omitempty"`
-	Number      int64  `json:"number"`
-	WireID      string `json:"wireID"`
-	Name        string `json:"name"`
-	Kind        string `json:"kind"`
-	Count       int    `json:"count"`
+	RankedTop10    bool   `json:"rankedTop10,omitempty"`
+	PreviewOnFocus bool   `json:"previewOnFocus,omitempty"`
+	Number         int64  `json:"number"`
+	WireID         string `json:"wireID"`
+	Name           string `json:"name"`
+	Kind           string `json:"kind"`
+	Count          int    `json:"count"`
 }
 
 func encodeShelves(in []personalShelf) ([]byte, error) {
 	out := make([]storedPersonalShelf, len(in))
 	for i, shelf := range in {
-		out[i] = storedPersonalShelf{RankedTop10: shelf.row.RankedTop10, Number: shelf.number, WireID: shelf.wireID, Name: shelf.name, Kind: shelf.kind, Count: shelf.count}
+		out[i] = storedPersonalShelf{PreviewOnFocus: shelf.row.PreviewOnFocus, RankedTop10: shelf.row.RankedTop10, Number: shelf.number, WireID: shelf.wireID, Name: shelf.name, Kind: shelf.kind, Count: shelf.count}
 	}
 	return json.Marshal(out)
 }
@@ -325,7 +326,7 @@ func decodeShelves(body []byte) ([]personalShelf, error) {
 		if shelf.WireID == "" || shelf.Name == "" {
 			continue
 		}
-		out = append(out, personalShelf{number: shelf.Number, wireID: shelf.WireID, name: shelf.Name, kind: shelf.Kind, count: shelf.Count, row: frontend.Row{RankedTop10: shelf.RankedTop10}})
+		out = append(out, personalShelf{number: shelf.Number, wireID: shelf.WireID, name: shelf.Name, kind: shelf.Kind, count: shelf.Count, row: frontend.Row{PreviewOnFocus: shelf.PreviewOnFocus, RankedTop10: shelf.RankedTop10}})
 	}
 	return out, nil
 }
@@ -918,7 +919,7 @@ func (i *instance) writePersonalItems(w http.ResponseWriter, r *http.Request, v 
 		return
 	}
 	i.notePersonalDelivery(r, v, shelf, page)
-	i.page(w, withRankedRow(r, shelf.row.RankedTop10, page, q.Offset), v, frontend.Page{Items: page, Total: total}, q.Offset)
+	i.page(w, withRankedRow(withPreviewRowArtwork(r, shelf.row.PreviewOnFocus), shelf.row.RankedTop10, page, q.Offset), v, frontend.Page{Items: page, Total: total}, q.Offset)
 }
 
 func (i *instance) writePersonalActivity(w http.ResponseWriter, r *http.Request, v *frontend.Viewer, number int64, latest bool, offset, limit int) {
@@ -953,7 +954,7 @@ func (i *instance) writePersonalActivity(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	i.notePersonalDelivery(r, v, shelf, page)
-	i.writeListedTitles(w, withRankedRow(r, shelf.row.RankedTop10, page, offset), v, page, nil, total, true, offset, latest)
+	i.writeListedTitles(w, withRankedRow(withPreviewRowArtwork(r, shelf.row.PreviewOnFocus), shelf.row.RankedTop10, page, offset), v, page, nil, total, true, offset, latest)
 }
 
 func (i *instance) personalViewOrder(r *http.Request, v *frontend.Viewer) []string {
@@ -1185,6 +1186,9 @@ func (i *instance) recommendations(w http.ResponseWriter, r *http.Request, want 
 			item := i.itemDTO(title, states[title.Key])
 			for key, value := range images[title.Key] {
 				item[key] = value
+			}
+			if !shelf.row.RankedTop10 {
+				previewRowArtwork(withPreviewRowArtwork(r, shelf.row.PreviewOnFocus), item)
 			}
 			i.shapeJellyfinItem(r, v, item, title)
 			i.applyListedRatings(item, ratingFacts, title.Key)

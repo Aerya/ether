@@ -2,9 +2,12 @@ package collections
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
+	"net"
 	"slices"
 	"strings"
 	"time"
@@ -14,6 +17,29 @@ import (
 )
 
 const describeCacheMax = 256
+
+// The draft, name resolution and bounded candidates share one deadline. A
+// detached search request cannot inherit the caller's short response budget.
+const describeJobTimeout = 2 * time.Minute
+
+// CollectionDraftAgent is the console Describe it tool loop, run headlessly.
+// Kept as a dependency to avoid coupling collection evaluation to the agent.
+type CollectionDraftAgent interface {
+	DescribeCollectionAvailable() bool
+	DescribeCollection(context.Context, string) (*core.CollectionSpec, error)
+}
+
+func (s *Service) SetDescribeAgent(agent CollectionDraftAgent) {
+	s.depsMu.Lock()
+	s.describeAgent = agent
+	s.depsMu.Unlock()
+}
+
+func (s *Service) collectionDraftAgent() CollectionDraftAgent {
+	s.depsMu.RLock()
+	defer s.depsMu.RUnlock()
+	return s.describeAgent
+}
 
 type describeDraft struct {
 	done chan struct{}
@@ -29,9 +55,8 @@ type describeJob struct {
 }
 
 func (s *Service) DescriptiveSearchAvailable() bool {
-	chat := s.chatDep()
-	_, ok := s.cat.(core.DescriptiveCatalog)
-	return ok && chat != nil && chat.Enabled()
+	agent := s.collectionDraftAgent()
+	return agent != nil && agent.DescribeCollectionAvailable()
 }
 
 // DescribeSearch schedules at most two jobs. Cache hits never call the model.
@@ -69,7 +94,7 @@ func (s *Service) DescribeSearch(ctx context.Context, user *core.User, query str
 	if job == nil {
 		if s.describeActive >= 2 {
 			s.describeMu.Unlock()
-			return core.DescriptiveResult{State: "busy"}, nil
+			return core.DescriptiveResult{State: "busy", RetryAfterSeconds: 2}, nil
 		}
 		if s.describeJobs == nil {
 			s.describeJobs = map[string]*describeJob{}
@@ -101,7 +126,7 @@ func (s *Service) DescribeSearch(ctx context.Context, user *core.User, query str
 		select {
 		case <-job.done:
 		default:
-			return core.DescriptiveResult{State: "pending"}, nil
+			return core.DescriptiveResult{State: "pending", RetryAfterSeconds: 2}, nil
 		}
 	}
 	select {
@@ -109,6 +134,9 @@ func (s *Service) DescribeSearch(ctx context.Context, user *core.User, query str
 		return core.DescriptiveResult{}, ctx.Err()
 	case <-job.done:
 		result := job.result
+		if result.State == "failed" {
+			result.RetryAfterSeconds = max(1, int(math.Ceil((time.Minute - s.now().Sub(job.at)).Seconds())))
+		}
 		result.Items = slices.Clone(result.Items)
 		result.Items = slices.DeleteFunc(result.Items, func(t core.Title) bool {
 			return t.Adult || (user != nil && contentrating.Exceeds(t.ContentRating, user.MaxContentRating))
@@ -165,9 +193,25 @@ func (s *Service) describeSpec(ctx context.Context, key, query string) (*core.Co
 	draft = &describeDraft{done: make(chan struct{}), at: s.now()}
 	s.describeDrafts[key] = draft
 	s.describeMu.Unlock()
-	// Same generator, SpecGuide and parseDraft used by Describe a collection.
-	// Only local sources are useful in a search; no external discovery work.
-	spec, _, err := s.Generate(ctx, query+"\nFor this temporary search use the catalog source (or local TMDB person, keyword, studio or franchise sources when needed) and local genre, keyword, year, rating, votes, popularity, runtime, language, country or studio rules. Do not use external lists or per-viewer watch-state rules. Limit to 200 titles.", MediaMixed)
+	// Run exactly the console's Describe it agent, not the one-shot generator.
+	var spec *core.CollectionSpec
+	var err error
+	if agent := s.collectionDraftAgent(); agent != nil {
+		spec, err = agent.DescribeCollection(core.WithoutCatalogViewer(ctx), query)
+	} else {
+		err = ErrLLMDisabled
+	}
+	if err == nil && spec == nil {
+		err = fmt.Errorf("collection agent returned no draft")
+	}
+	if err == nil {
+		// Rules only: never log the request, model explanation or credentials.
+		log := s.log
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Debug("descriptive search rules", "media_type", spec.MediaType, "match", spec.Match, "rules", spec.Rules, "exclude", spec.Exclude)
+	}
 	s.describeMu.Lock()
 	draft.spec, draft.err, draft.at = spec, err, s.now()
 	close(draft.done)
@@ -176,17 +220,32 @@ func (s *Service) describeSpec(ctx context.Context, key, query string) (*core.Co
 }
 
 func (s *Service) runDescribe(parent context.Context, user *core.User, key, query string, job *describeJob) {
-	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(parent, describeJobTimeout)
 	defer cancel()
+	started := time.Now()
+	stage := "draft"
+	var draftDuration, candidateDuration, scoringDuration time.Duration
 	spec, err := s.describeSpec(ctx, key, query)
+	draftDuration = time.Since(started)
 	result := core.DescriptiveResult{State: "failed"}
 	if err == nil {
-		result.Items, err = s.cat.(core.DescriptiveCatalog).DescribeCandidates(core.WithCatalogViewer(core.WithExplicitSearch(ctx), user), *spec, 200)
+		stage = "candidates"
+		candidatesStarted := time.Now()
+		// The console's collection_draft uses Preview too: preserve its source
+		// handling, rule evaluation, exclusions, ordering and spec limit.
+		var preview *core.CollectionPreview
+		preview, err = s.Preview(core.WithoutCatalogViewer(ctx), *spec, 200)
+		if err == nil {
+			result.Items = preview.Items
+		}
+		candidateDuration = time.Since(candidatesStarted)
 		if err == nil {
 			result.State, result.Title = "ready", spec.Name
 			result.Spec = spec
-			// Reuse the viewer's existing taste model on the bounded candidate set.
-			if sc := s.personalScorer(); sc != nil && user != nil && len(result.Items) > 1 {
+			// Taste only orders rule-matching candidates; it cannot add titles.
+			stage = "scoring"
+			scoringStarted := time.Now()
+			if sc := s.personalScorer(); spec.Sort == "personal" && sc != nil && user != nil && len(result.Items) > 1 {
 				if scores, e := sc.ScoreTitles(ctx, user, result.Items); e == nil {
 					slices.SortStableFunc(result.Items, func(a, b core.Title) int {
 						x, y := scores[a.Key], scores[b.Key]
@@ -206,10 +265,36 @@ func (s *Service) runDescribe(parent context.Context, user *core.User, key, quer
 					})
 				}
 			}
+			scoringDuration = time.Since(scoringStarted)
 		}
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	log := s.log
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Debug("descriptive search timings", "draft_duration", draftDuration, "candidate_duration", candidateDuration, "scoring_duration", scoringDuration, "duration", time.Since(started), "candidates", len(result.Items))
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
 		result.State = "failed"
+		class := "upstream"
+		var netErr net.Error
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			class = "timeout"
+		case errors.Is(err, context.Canceled):
+			class = "cancelled"
+		case errors.As(err, &netErr) && netErr.Timeout():
+			class = "timeout"
+		case stage == "candidates":
+			class = "catalog"
+		}
+		log := s.log
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Warn("descriptive search failed", "query_hash", fmt.Sprintf("%x", sha256.Sum256([]byte(key))), "stage", stage, "error_class", class, "duration", time.Since(started))
 	}
 	s.describeMu.Lock()
 	job.result, job.err, job.at = result, err, s.now()

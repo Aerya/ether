@@ -79,6 +79,8 @@ type FilterGroup struct {
 
 // Filter narrows a browse or a smart collection. Zero values mean "any".
 type Filter struct {
+	// Topic matches a bounded local keyword/overview candidate set.
+	Topic               string       `json:"topic,omitempty"`
 	LocalOnly           bool         `json:"-"` // console filtering never hydrates remote credits on the request path
 	CatalogCandidates   bool         `json:"-"`
 	CatalogViewerID     int64        `json:"-"`
@@ -341,35 +343,37 @@ type ImageURLFunc func(path, size string) string
 
 // Hub is a Home row or a section row.
 type Hub struct {
-	ID          string    `json:"id"` // stable identifier, e.g. "trending.week.movie"
-	Title       string    `json:"title"`
-	Type        MediaType `json:"type"`            // item type in the row ("mixed" allowed via "")
-	Context     string    `json:"context"`         // Plex hub context, e.g. "hub.movie.recentlyreleased"
-	Style       string    `json:"style,omitempty"` // "shelf", "hero", "clip"
-	RankedTop10 bool      `json:"rankedTop10,omitempty"`
-	Promoted    bool      `json:"promoted"` // show on Home
-	Items       []Title   `json:"items"`
-	More        bool      `json:"more"`
-	Key         RatingKey `json:"key,omitempty"` // backing collection, if any
+	RankedTop10    bool      `json:"rankedTop10,omitempty"`
+	ID             string    `json:"id"` // stable identifier, e.g. "trending.week.movie"
+	Title          string    `json:"title"`
+	Type           MediaType `json:"type"`            // item type in the row ("mixed" allowed via "")
+	Context        string    `json:"context"`         // Plex hub context, e.g. "hub.movie.recentlyreleased"
+	Style          string    `json:"style,omitempty"` // "shelf", "hero", "clip"
+	PreviewOnFocus bool      `json:"previewOnFocus,omitempty"`
+	Promoted       bool      `json:"promoted"` // show on Home
+	Items          []Title   `json:"items"`
+	More           bool      `json:"more"`
+	Key            RatingKey `json:"key,omitempty"` // backing collection, if any
 	// ItemCount carries rendered availability when a front end retains the
 	// actual metadata and asks only for row placement.
 	ItemCount int `json:"itemCount,omitempty"`
 }
 
 type Collection struct {
-	RankedTop10  bool      `json:"rankedTop10,omitempty"`
-	Key          RatingKey `json:"key"`
-	Title        string    `json:"title"`
-	Summary      string    `json:"summary,omitempty"`
-	Kind         string    `json:"kind"` // "franchise", "trending", "smart", "user"
-	Type         MediaType `json:"type"`
-	Filter       *Filter   `json:"filter,omitempty"` // smart
-	Sort         SortOrder `json:"sort,omitempty"`
-	OwnerUserID  int64     `json:"ownerUserId,omitempty"` // 0 = server-wide
-	PosterPath   string    `json:"posterPath,omitempty"`
-	BackdropPath string    `json:"backdropPath,omitempty"`
-	ChildCount   int       `json:"childCount"`
-	Upcoming     bool      `json:"upcoming,omitempty"` // admits scoped future placeholders
+	RankedTop10    bool      `json:"rankedTop10,omitempty"`
+	PreviewOnFocus bool      `json:"previewOnFocus,omitempty"`
+	Key            RatingKey `json:"key"`
+	Title          string    `json:"title"`
+	Summary        string    `json:"summary,omitempty"`
+	Kind           string    `json:"kind"` // "franchise", "trending", "smart", "user"
+	Type           MediaType `json:"type"`
+	Filter         *Filter   `json:"filter,omitempty"` // smart
+	Sort           SortOrder `json:"sort,omitempty"`
+	OwnerUserID    int64     `json:"ownerUserId,omitempty"` // 0 = server-wide
+	PosterPath     string    `json:"posterPath,omitempty"`
+	BackdropPath   string    `json:"backdropPath,omitempty"`
+	ChildCount     int       `json:"childCount"`
+	Upcoming       bool      `json:"upcoming,omitempty"` // admits scoped future placeholders
 	// UpdatedAt changes when the collection's members or artwork change, so
 	// Plex clients refetch artwork (additive).
 	UpdatedAt time.Time `json:"updatedAt,omitempty"`
@@ -769,8 +773,11 @@ type StreamInfo struct {
 	ProbedLevel        *int     `json:"probedLevel,omitempty"`
 	FieldOrder         string   `json:"fieldOrder,omitempty"`
 	ProbedInterlaced   *bool    `json:"probedInterlaced,omitempty"`
-	BitDepth           int      `json:"bitDepth,omitempty"`
-	ColorTransfer      string   `json:"colorTransfer,omitempty"` // smpte2084 = HDR10, arib-std-b67 = HLG
+	// Rotation is ffprobe display-matrix rotation in degrees (counterclockwise).
+	// Nil means no rotation evidence, distinct from an explicit zero.
+	Rotation      *float64 `json:"rotation,omitempty"`
+	BitDepth      int      `json:"bitDepth,omitempty"`
+	ColorTransfer string   `json:"colorTransfer,omitempty"` // smpte2084 = HDR10, arib-std-b67 = HLG
 	// HEVCParameterSets reports a complete VPS/SPS/PPS hvcC record, safe for mp4toannexb.
 	HEVCParameterSets bool `json:"hevcParameterSets,omitempty"`
 	// Signalled picture format, in ffprobe's names; empty when the stream
@@ -830,9 +837,9 @@ type Chapter struct {
 
 // ProbeFactsVersion is the generation of facts a probe is expected to carry,
 // including reference frames, descriptive audio handler titles, HEVC decoder-
-// configuration parameter-set completeness, and AAC channel configurations.
+// configuration completeness, AAC channels, scan and rotation facts.
 // Persisted probes from an older generation are cache misses.
-const ProbeFactsVersion = 8
+const ProbeFactsVersion = 9
 
 type MediaInfo struct {
 	Has64bitOffsets       *bool         `json:"has64bitOffsets,omitempty"`

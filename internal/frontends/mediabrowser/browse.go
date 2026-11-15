@@ -428,6 +428,7 @@ func (i *instance) browseRoutes() error {
 				for key, value := range images[title.Key] {
 					item[key] = value
 				}
+				previewRowArtwork(r, item)
 				i.shapeJellyfinItem(r, v, item, title)
 				i.jellyfinSeasonListFields(r, item, title)
 				i.applyListedRatings(item, ratingFacts, title.Key)
@@ -804,6 +805,7 @@ func (i *instance) pageWithExtra(w http.ResponseWriter, r *http.Request, v *fron
 				for key, value := range images[title.Key] {
 					item[key] = value
 				}
+				previewRowArtwork(r, item)
 				i.shapeJellyfinItem(r, v, item, title)
 				i.jellyfinListFacts(r, item, title)
 				i.jellyfinListFields(r, item, title)
@@ -831,6 +833,7 @@ func (i *instance) pageWithExtra(w http.ResponseWriter, r *http.Request, v *fron
 		for key, value := range images[title.Key] {
 			item[key] = value
 		}
+		previewRowArtwork(r, item)
 		i.shapeJellyfinItem(r, v, item, title)
 		i.jellyfinListFacts(r, item, title)
 		i.jellyfinListFields(r, item, title)

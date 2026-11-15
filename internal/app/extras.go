@@ -1,7 +1,10 @@
 package app
 
 import (
+	"context"
 	"path/filepath"
+
+	"github.com/braedonsaunders/ether/internal/core"
 
 	"github.com/braedonsaunders/ether/internal/config"
 	"github.com/braedonsaunders/ether/internal/extras"
@@ -19,6 +22,12 @@ func (a *App) buildExtras() {
 		cacheDir = filepath.Join(root, "trailers")
 	}
 	a.extras = extras.New(extras.Options{
+		ThemeFFmpeg: func() string {
+			if a.transcoder != nil {
+				return a.transcoder.FFmpegPath()
+			}
+			return ""
+		},
 		Videos:     a.tmdb,
 		CacheDir:   cacheDir,
 		Config:     func() config.Extras { return a.cfg.Read().Extras },
@@ -26,9 +35,31 @@ func (a *App) buildExtras() {
 		ToolsDir:   filepath.Join(a.opts.DataDir, "tools"),
 		Downloader: dl,
 	})
+	a.closers = append(a.closers, a.extras.Close)
 	if reason := a.extras.DisabledReason(); reason != "" {
 		a.log.Info("extras off", "reason", reason)
 	} else {
 		a.log.Info("extras on", "command", a.extras.CommandAvailable())
 	}
+}
+
+// themeTitle only reads the local catalogue and current inherited access policy.
+func (a *App) themeTitle(ctx context.Context, viewer *core.Viewer, key core.RatingKey) (*core.Title, error) {
+	if viewer == nil || a.catalog == nil {
+		return nil, core.ErrNotFound
+	}
+	switch key.Kind() {
+	case core.KindShow, core.KindSeason, core.KindEpisode:
+	default:
+		return nil, core.ErrNotFound
+	}
+	title, err := a.catalog.CachedGet(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	vis := experienceVisibility(a.safety, a.catalog.CachedGet, nil, nil, a.configuredLibraries())
+	if !vis.Playable(ctx, viewer, title) {
+		return nil, core.ErrNotFound
+	}
+	return title, nil
 }

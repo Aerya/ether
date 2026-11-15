@@ -174,6 +174,7 @@ var mixedSections = map[string]map[string]Scope{
 		"flareSolverrUrl": Local,
 	},
 	"extras": {
+		"themeMusic":   Shared,
 		"enabled":      Shared,
 		"prewarmBytes": Shared,
 		// Trailer bytes live under this node's cache directory.

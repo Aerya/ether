@@ -176,7 +176,7 @@ func (s *Session) startRunLocked(seg int, bigProbe bool) error {
 	// Keep a delivered rendition alive while a replacement starts at the exact
 	// requested segment. A second switch retires the preceding overlap first.
 	s.stopHandoffLocked()
-	overlap := s.cur != nil && !s.cur.finished && !s.cur.stopped && s.cur.track != s.wantTrack && len(s.rungs) > 1 && !s.liveInput && !s.cur.rtx
+	overlap := !s.serialRungs && s.cur != nil && !s.cur.finished && !s.cur.stopped && s.cur.track != s.wantTrack && len(s.rungs) > 1 && !s.liveInput && !s.cur.rtx
 	if overlap {
 		s.handoff = s.cur
 		s.handoffAt = time.Now()
@@ -570,6 +570,7 @@ func (s *Session) startRunLocked(seg int, bigProbe bool) error {
 		s.decision.Enhancement.State = "starting"
 		s.decision.Enhancement.Reason = "waiting for enhanced segments from NVEncC/NGX"
 	}
+	s.preparationLocked("encoder-start", r.track)
 	r.proc = proc
 	s.cur = r
 	started = true

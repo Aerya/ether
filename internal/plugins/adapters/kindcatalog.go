@@ -425,6 +425,7 @@ func (c *KindCatalog) Browse(ctx context.Context, lib core.Library, q frontend.I
 		return experience.PluginBrowsePage{}, err
 	}
 	bq := pluginitems.BrowseQuery{
+		NoTotal:   q.NoTotal,
 		Policy:    policy,
 		LibraryID: lib.ID,
 		Level:     level,

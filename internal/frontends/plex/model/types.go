@@ -247,6 +247,7 @@ type Metadata struct {
 	GrandparentArt        string  `plex:"grandparentArt,omitempty"`
 	Theme                 string  `plex:"theme,omitempty"`
 	GrandparentTheme      string  `plex:"grandparentTheme,omitempty"`
+	ParentTheme           string  `plex:"parentTheme,omitempty"`
 	Duration              int64   `plex:"duration,omitempty"`
 	OriginallyAvailableAt string  `plex:"originallyAvailableAt,omitempty"`
 	LeafCount             *int    `plex:"leafCount"`
@@ -532,22 +533,23 @@ type Stream struct {
 
 // Hub is a row of items.
 type Hub struct {
-	Channel       []SearchChannel `plex:"Channel"`
-	Meta          *Meta           `plex:"Meta,object"`
-	RankedTop10   bool            `plex:"-"`
-	HubKey        string          `plex:"hubKey,omitempty"`
-	UpNext        *bool           `plex:"upNext"`
-	Key           string          `plex:"key,omitempty"`
-	Title         string          `plex:"title"`
-	Type          string          `plex:"type"`
-	HubIdentifier string          `plex:"hubIdentifier"`
-	Context       string          `plex:"context"`
-	Size          int             `plex:"size"`
-	TotalSize     *int            `plex:"totalSize"`
-	More          bool            `plex:"more"`
-	Style         string          `plex:"style,omitempty"`
-	Promoted      *bool           `plex:"promoted"`
-	Random        *bool           `plex:"random"`
+	Channel        []SearchChannel `plex:"Channel"`
+	Meta           *Meta           `plex:"Meta,object"`
+	RankedTop10    bool            `plex:"-"`
+	PreviewOnFocus bool            `plex:"-"`
+	HubKey         string          `plex:"hubKey,omitempty"`
+	UpNext         *bool           `plex:"upNext"`
+	Key            string          `plex:"key,omitempty"`
+	Title          string          `plex:"title"`
+	Type           string          `plex:"type"`
+	HubIdentifier  string          `plex:"hubIdentifier"`
+	Context        string          `plex:"context"`
+	Size           int             `plex:"size"`
+	TotalSize      *int            `plex:"totalSize"`
+	More           bool            `plex:"more"`
+	Style          string          `plex:"style,omitempty"`
+	Promoted       *bool           `plex:"promoted"`
+	Random         *bool           `plex:"random"`
 
 	Metadata  []Metadata  `plex:"Metadata"`
 	Directory []Directory `plex:"Directory"`

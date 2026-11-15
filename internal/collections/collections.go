@@ -74,6 +74,7 @@ type Service struct {
 	describeJobs   map[string]*describeJob
 	describeDrafts map[string]*describeDraft
 	describeActive int
+	describeAgent  CollectionDraftAgent
 	vibe           *vibeRegistry
 	vibeTTL        time.Duration
 	vibeMax        int
@@ -716,7 +717,7 @@ func (s *Service) collectionFor(ctx context.Context, row *specRow, user *core.Us
 	if row.spec.MediaType == MediaMixed && t != "" {
 		keys = sectionKeys(keys, t)
 	}
-	c := core.Collection{RankedTop10: row.spec.RankedTop10, Key: row.key(), Title: row.spec.Name, Summary: row.spec.Description, Kind: "smart",
+	c := core.Collection{PreviewOnFocus: row.spec.PreviewOnFocus, RankedTop10: row.spec.RankedTop10, Key: row.key(), Title: row.spec.Name, Summary: row.spec.Description, Kind: "smart",
 		OwnerUserID: row.owner, ChildCount: len(keys), Upcoming: row.spec.ReleaseMode == "upcoming" || row.spec.ReleaseMode == "mixed"}
 	if c.RankedTop10 {
 		c.ChildCount = min(c.ChildCount, 10)

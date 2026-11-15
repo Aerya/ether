@@ -25,12 +25,96 @@ type PreviewSource struct {
 
 var ErrPreviewPreparing = errors.New("preview preparing")
 
+// A preparation has no media grant or playback session. At most four exist,
+// each starts on focus and stops on replacement, shutdown or its 90 second bound.
+type previewPreparation struct {
+	item     core.RatingKey
+	extra    core.RatingKey
+	device   string
+	protocol frontend.Protocol
+	language string
+	done     chan struct{}
+	cancel   context.CancelFunc
+	source   PreviewSource
+	err      error
+	finished time.Time
+}
+
+func (b *Broker) previewSource(ctx context.Context, req PreviewRequest, viewer *core.Viewer, title *core.Title) (PreviewSource, error) {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return PreviewSource{}, core.ErrNotAvailable
+	}
+	if b.previewPreparations == nil {
+		b.previewPreparations = map[int64]*previewPreparation{}
+	}
+	for id, job := range b.previewPreparations {
+		if !job.finished.IsZero() && time.Since(job.finished) > time.Minute {
+			delete(b.previewPreparations, id)
+		}
+	}
+	job := b.previewPreparations[viewer.ID]
+	if job != nil && (job.item != req.Item || job.extra != req.Extra || job.device != req.Device.ID || job.protocol != req.Protocol || job.language != req.Language) {
+		job.cancel()
+		if job.finished.IsZero() {
+			b.mu.Unlock()
+			return PreviewSource{}, ErrPreviewPreparing
+		}
+		delete(b.previewPreparations, viewer.ID)
+		job = nil
+	}
+	if job == nil {
+		if len(b.previewPreparations) >= 4 {
+			b.mu.Unlock()
+			return PreviewSource{}, ErrPreviewPreparing
+		}
+		workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
+		job = &previewPreparation{item: req.Item, extra: req.Extra, device: req.Device.ID, protocol: req.Protocol, language: req.Language, done: make(chan struct{}), cancel: cancel}
+		b.previewPreparations[viewer.ID] = job
+		b.previewWG.Add(1)
+		go func(job *previewPreparation) {
+			defer b.previewWG.Done()
+			defer cancel()
+			var source PreviewSource
+			var err error
+			if req.Extra != 0 {
+				source, err = b.deps.ExtraSource(workCtx, viewer, title, req.Extra, req.Language)
+			} else {
+				source, err = b.deps.PreviewSource(workCtx, viewer, title, req.Language)
+			}
+			b.mu.Lock()
+			job.source, job.err, job.finished = source, err, time.Now()
+			close(job.done)
+			b.mu.Unlock()
+		}(job)
+	}
+	b.mu.Unlock()
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-job.done:
+		b.mu.Lock()
+		if b.previewPreparations[viewer.ID] == job {
+			delete(b.previewPreparations, viewer.ID)
+		}
+		b.mu.Unlock()
+		return job.source, job.err
+	case <-ctx.Done():
+		job.cancel()
+		return PreviewSource{}, ctx.Err()
+	case <-timer.C:
+		return PreviewSource{}, ErrPreviewPreparing
+	}
+}
+
 type previewSession struct {
 	lifetime   context.Context
 	cancel     context.CancelFunc
 	public     frontend.Session
 	grant      frontend.TrailerPreviewGrant
 	token, key string
+	extra      core.RatingKey
 	caps       core.ClientCaps
 	source     PreviewSource
 }
@@ -38,8 +122,26 @@ type previewSession struct {
 // TrailerPreview has a separate lightweight allowance: one per viewer, at most
 // 128 grants and 4 pending requests per broker. It never reserves feature-film
 // stream/encoder slots, warms releases, or calls progress/history callbacks.
-// Work follows the request context; preparing means retry, not background work.
+// Focus starts bounded preparation only when needed. Slow preparation returns
+// preparing quickly; no grant exists until a fresh request rechecks policy.
 func (b *Broker) TrailerPreview(ctx context.Context, req PreviewRequest) (PreviewResult, error) {
+	req.Extra = 0
+	return b.trailerSession(ctx, req, "preview")
+}
+
+func (b *Broker) ExtraPlayback(ctx context.Context, req PreviewRequest) (PreviewResult, error) {
+	if !b.ExtraPlaybackAvailable() {
+		return PreviewResult{State: "unavailable", Reason: "feature_unavailable"}, nil
+	}
+	extra, ok := b.deps.ExtraLookup(req.Item)
+	if !ok || extra.Key != req.Item || extra.ParentKey == 0 || (extra.Kind != "trailer" && extra.Kind != "teaser") {
+		return PreviewResult{State: "unavailable", Reason: "trailer_unavailable"}, nil
+	}
+	req.Extra, req.Item = req.Item, extra.ParentKey
+	return b.trailerSession(ctx, req, "playback")
+}
+
+func (b *Broker) trailerSession(ctx context.Context, req PreviewRequest, purpose string) (PreviewResult, error) {
 	unavailable := PreviewResult{State: "unavailable", Reason: "trailer_unavailable"}
 	if req.Protocol == "" || req.Device.ID == "" || len(req.Device.ID) > 256 || req.IdempotencyKey == "" || len(req.IdempotencyKey) > 256 || req.Item == 0 {
 		return unavailable, core.ErrUnauthorized
@@ -70,7 +172,7 @@ func (b *Broker) TrailerPreview(ctx context.Context, req PreviewRequest) (Previe
 		return unavailable, core.ErrNotAvailable
 	}
 	for _, s := range b.previews {
-		if s.public.ViewerID == viewer.ID && s.public.Device.ID == req.Device.ID && s.public.Protocol == req.Protocol && s.public.Item == req.Item && s.key == req.IdempotencyKey {
+		if s.public.ViewerID == viewer.ID && s.public.Device.ID == req.Device.ID && s.public.Protocol == req.Protocol && s.public.Item == req.Item && s.extra == req.Extra && s.grant.Purpose == purpose && s.key == req.IdempotencyKey {
 
 			// A ready response promises bytes still exist for this generation.
 			file, openErr := s.source.Open()
@@ -89,10 +191,17 @@ func (b *Broker) TrailerPreview(ctx context.Context, req PreviewRequest) (Previe
 		b.mu.Unlock()
 		return PreviewResult{State: "preparing", RetryAfterSeconds: 1}, nil
 	}
+	// A new focus relinquishes the previous grant before any cold work.
+	for id, old := range b.previews {
+		if old.public.ViewerID == viewer.ID && old.grant.Purpose == purpose {
+			old.cancel()
+			delete(b.previews, id)
+		}
+	}
 	b.previewPending[viewer.ID] = true
 	b.mu.Unlock()
 	defer func() { b.mu.Lock(); delete(b.previewPending, viewer.ID); b.mu.Unlock() }()
-	source, err := b.deps.PreviewSource(ctx, viewer, title, req.Language)
+	source, err := b.previewSource(ctx, req, viewer, title)
 	if errors.Is(err, ErrPreviewPreparing) {
 		return PreviewResult{State: "preparing", RetryAfterSeconds: 1}, nil
 	}
@@ -122,7 +231,11 @@ func (b *Broker) TrailerPreview(ctx context.Context, req PreviewRequest) (Previe
 		return unavailable, err
 	}
 	id, token := rand.Text(), rand.Text()
-	grant := frontend.TrailerPreviewGrant{SessionID: id, URL: "/sessions/media/" + id + "/" + token + "/preview.mp4", MIMEType: source.MIMEType, ExpiresAt: b.deps.Now().Add(2 * time.Minute), Purpose: "preview", SourceGeneration: 1, SeekGeneration: 1}
+	lifetimeLimit := 2 * time.Minute
+	if purpose == "playback" {
+		lifetimeLimit = 2 * time.Hour
+	}
+	grant := frontend.TrailerPreviewGrant{SessionID: id, URL: "/sessions/media/" + id + "/" + token + "/preview.mp4", MIMEType: source.MIMEType, ExpiresAt: b.deps.Now().Add(lifetimeLimit), Purpose: purpose, SourceGeneration: 1, SeekGeneration: 1}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
@@ -130,7 +243,7 @@ func (b *Broker) TrailerPreview(ctx context.Context, req PreviewRequest) (Previe
 	}
 	b.prunePreviewsLocked()
 	for sid, s := range b.previews {
-		if s.public.ViewerID == viewer.ID {
+		if s.public.ViewerID == viewer.ID && s.grant.Purpose == purpose {
 			s.cancel()
 			delete(b.previews, sid)
 		}
@@ -139,7 +252,7 @@ func (b *Broker) TrailerPreview(ctx context.Context, req PreviewRequest) (Previe
 		return PreviewResult{State: "preparing", RetryAfterSeconds: 1}, nil
 	}
 	lifetime, cancel := context.WithCancel(context.Background())
-	b.previews[id] = previewSession{lifetime: lifetime, cancel: cancel, public: frontend.Session{ID: id, MediaPath: grant.URL, Protocol: req.Protocol, ViewerID: viewer.ID, Device: req.Device, Item: req.Item, StartedAt: b.deps.Now(), PlayMethod: "DirectPlay", Purpose: "preview"}, grant: grant, token: token, key: req.IdempotencyKey, caps: req.Caps, source: source}
+	b.previews[id] = previewSession{lifetime: lifetime, cancel: cancel, public: frontend.Session{ID: id, MediaPath: grant.URL, Protocol: req.Protocol, ViewerID: viewer.ID, Device: req.Device, Item: req.Item, StartedAt: b.deps.Now(), PlayMethod: "DirectPlay", Purpose: purpose}, extra: req.Extra, grant: grant, token: token, key: req.IdempotencyKey, caps: req.Caps, source: source}
 	return PreviewResult{State: "ready", Grant: &grant}, nil
 }
 func (b *Broker) prunePreviewsLocked() {
@@ -260,4 +373,31 @@ func (f previewReadSeeker) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return f.File.Read(p)
+}
+
+func (b *Broker) TrailerPreviewAvailable() bool {
+	return b.deps.PreviewSource != nil && (b.deps.PreviewAvailable == nil || b.deps.PreviewAvailable())
+}
+func (s surface) TrailerPreviewAvailable() bool {
+	if p, ok := s.broker.(frontend.TrailerPreviewAvailability); ok {
+		return p.TrailerPreviewAvailable()
+	}
+	return false
+}
+
+func (b *Broker) ExtraPlaybackAvailable() bool {
+	return b.TrailerPreviewAvailable() && b.deps.ExtraLookup != nil && b.deps.ExtraSource != nil
+}
+func (s surface) ExtraPlaybackAvailable() bool {
+	p, ok := s.broker.(frontend.ExtraPlaybacks)
+	return ok && p.ExtraPlaybackAvailable()
+}
+func (s surface) ExtraPlayback(ctx context.Context, r frontend.TrailerPreviewRequest) (frontend.TrailerPreviewResult, error) {
+	if r.Protocol != s.protocol {
+		return frontend.TrailerPreviewResult{}, core.ErrUnauthorized
+	}
+	if p, ok := s.broker.(frontend.ExtraPlaybacks); ok {
+		return p.ExtraPlayback(ctx, r)
+	}
+	return frontend.TrailerPreviewResult{State: "unavailable", Reason: "unsupported"}, nil
 }

@@ -13,8 +13,8 @@ import (
 // stay on the wire row. Callers record the report when they paint the row.
 func homeLayoutFacts(row model.Hub) (frontend.Hub, frontend.NeutralHomeRow) {
 	count := max(row.Size, len(row.Metadata)+len(row.Directory))
-	hub := frontend.Hub{ID: row.HubIdentifier, Title: row.Title, Type: frontend.MediaType(row.Type), Context: row.Context, ItemCount: count, RankedTop10: row.RankedTop10}
-	neutral := frontend.NeutralHomeRow{ID: row.HubIdentifier, Title: row.Title, Type: frontend.MediaType(row.Type), Purpose: frontend.HomePurpose(frontend.Hub{ID: row.HubIdentifier, Type: frontend.MediaType(row.Type)}), ItemCount: count, RankedTop10: row.RankedTop10}
+	hub := frontend.Hub{ID: row.HubIdentifier, Title: row.Title, Type: frontend.MediaType(row.Type), Context: row.Context, ItemCount: count, PreviewOnFocus: row.PreviewOnFocus, RankedTop10: row.RankedTop10}
+	neutral := frontend.NeutralHomeRow{ID: row.HubIdentifier, Title: row.Title, Type: frontend.MediaType(row.Type), Purpose: frontend.HomePurpose(frontend.Hub{ID: row.HubIdentifier, Type: frontend.MediaType(row.Type)}), ItemCount: count, PreviewOnFocus: row.PreviewOnFocus, RankedTop10: row.RankedTop10}
 	return hub, neutral
 }
 
@@ -116,6 +116,7 @@ func (s *Server) arrangeHomeRows(ctx context.Context, pr *Request, hc frontend.H
 		for _, row := range ordered {
 			if index, ok := byID[row.ID]; ok {
 				painted := rows[index]
+				painted.PreviewOnFocus = row.PreviewOnFocus
 				painted.RankedTop10 = row.RankedTop10
 				out = append(out, painted)
 			}
@@ -157,6 +158,10 @@ func stableHomeHubs(rows []model.Hub) []model.Hub {
 				continue
 			}
 			seen[h.HubIdentifier] = true
+		}
+		if h.PreviewOnFocus {
+			h.Metadata = append([]model.Metadata(nil), h.Metadata...)
+			landscapeMetadata(h.Metadata)
 		}
 		if h.RankedTop10 {
 			h.Metadata = append([]model.Metadata(nil), h.Metadata...)
@@ -251,4 +256,24 @@ func heroReadyHomeHubs(rows []model.Hub) []model.Hub {
 		out = append(out, h)
 	}
 	return out
+}
+
+// landscapeMetadata paints only response copies, retaining movie/show identities.
+func landscapeMetadata(items []model.Metadata) {
+	for i := range items {
+		m := &items[i]
+		art := m.Art
+		if art == "" {
+			art = m.GrandparentArt
+		}
+		if art != "" {
+			m.Thumb = art
+			m.Image = append([]model.Image(nil), m.Image...)
+			for n := range m.Image {
+				if m.Image[n].Type == "coverPoster" {
+					m.Image[n].URL = art
+				}
+			}
+		}
+	}
 }

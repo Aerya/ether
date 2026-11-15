@@ -89,6 +89,29 @@ export function PolicyEditor({
   return (
     <div className="space-y-3 border-t border-border-subtle pt-3 text-xs">
       <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-3">
+          <span>{t("Play trailer preview on focus")}</span>
+          <Segmented
+            ariaLabel={t("Play trailer preview on focus")}
+            size="sm"
+            value={
+              policy.previewOnFocus === undefined ? "default" : policy.previewOnFocus ? "on" : "off"
+            }
+            onChange={(v) =>
+              onChange({ ...policy, previewOnFocus: v === "default" ? undefined : v === "on" })
+            }
+            options={[
+              { value: "default", label: t("Default") },
+              { value: "on", label: t("On") },
+              { value: "off", label: t("Off") },
+            ]}
+          />
+        </div>
+        <p className="text-fg-muted">
+          {t(
+            "Vela and Moonfin can play the focused title's trailer. Other apps show wide artwork.",
+          )}
+        </p>
         <p className="text-fg-muted">{t("Ranked (Top 10)")}</p>
         <Segmented
           ariaLabel={t("Ranked (Top 10)")}

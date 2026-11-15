@@ -440,3 +440,66 @@ func (s scorecardSessionWrapper) TrailerPreview(ctx context.Context, r frontend.
 	}
 	return frontend.TrailerPreviewResult{State: "unavailable", Reason: "unsupported"}, nil
 }
+
+func (s scorecardSessionWrapper) TrailerPreviewAvailable() bool {
+	if p, ok := s.embeddedScorecardSessions.(frontend.TrailerPreviewAvailability); ok {
+		return p.TrailerPreviewAvailable()
+	}
+	return false
+}
+
+func (s scorecardSessionWrapper) StreamDecision(ctx context.Context, a frontend.SessionAccess, id string) (core.Decision, error) {
+	if reader, ok := s.embeddedScorecardSessions.(frontend.StreamDecisionReader); ok {
+		return reader.StreamDecision(ctx, a, id)
+	}
+	return core.Decision{}, core.ErrNotAvailable
+}
+
+func (s scorecardSessionWrapper) AudioFallbackAvailable() bool {
+	audio, ok := s.embeddedScorecardSessions.(frontend.AudioFallback)
+	return ok && audio.AudioFallbackAvailable()
+}
+func (s scorecardSessionWrapper) StartAudioFallback(ctx context.Context, a frontend.SessionAccess, id string, track int, pos time.Duration) (frontend.AudioFallbackResult, error) {
+	audio, ok := s.embeddedScorecardSessions.(frontend.AudioFallback)
+	if !ok {
+		return frontend.AudioFallbackResult{}, core.ErrNotAvailable
+	}
+	return audio.StartAudioFallback(ctx, a, id, track, pos)
+}
+func (s scorecardSessionWrapper) StopAudioFallback(ctx context.Context, a frontend.SessionAccess, id, audioID string) error {
+	audio, ok := s.embeddedScorecardSessions.(frontend.AudioFallback)
+	if !ok {
+		return core.ErrNotAvailable
+	}
+	return audio.StopAudioFallback(ctx, a, id, audioID)
+}
+
+func (s scorecardSessionWrapper) ProactiveFallbackAvailable() bool {
+	quality, ok := s.embeddedScorecardSessions.(frontend.QualitySessions)
+	return ok && quality.ProactiveFallbackAvailable()
+}
+func (s scorecardSessionWrapper) QualityRungs(ctx context.Context, a frontend.SessionAccess, id string) ([]core.HLSRung, error) {
+	quality, ok := s.embeddedScorecardSessions.(frontend.QualitySessions)
+	if !ok {
+		return nil, core.ErrNotAvailable
+	}
+	return quality.QualityRungs(ctx, a, id)
+}
+func (s scorecardSessionWrapper) PrepareQuality(ctx context.Context, a frontend.SessionAccess, id, rung string, position time.Duration) (string, time.Duration, error) {
+	quality, ok := s.embeddedScorecardSessions.(frontend.QualitySessions)
+	if !ok {
+		return "", 0, core.ErrNotAvailable
+	}
+	return quality.PrepareQuality(ctx, a, id, rung, position)
+}
+
+func (s scorecardSessionWrapper) ExtraPlaybackAvailable() bool {
+	p, ok := s.embeddedScorecardSessions.(frontend.ExtraPlaybacks)
+	return ok && p.ExtraPlaybackAvailable()
+}
+func (s scorecardSessionWrapper) ExtraPlayback(ctx context.Context, r frontend.TrailerPreviewRequest) (frontend.TrailerPreviewResult, error) {
+	if p, ok := s.embeddedScorecardSessions.(frontend.ExtraPlaybacks); ok {
+		return p.ExtraPlayback(ctx, r)
+	}
+	return frontend.TrailerPreviewResult{State: "unavailable", Reason: "unsupported"}, nil
+}

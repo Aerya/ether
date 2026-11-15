@@ -179,6 +179,10 @@ func (i *instance) playbackInfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", 401)
 		return
 	}
+	if themeParentID(r.PathValue("id")) != "" {
+		i.themePlaybackInfo(w, r)
+		return
+	}
 	if i.host.Sessions == nil || i.host.Capabilities == nil {
 		http.Error(w, "Unavailable", 503)
 		return
@@ -1156,6 +1160,16 @@ func directFilePath(path string) bool {
 
 // streamAlias translates client-generated URLs into broker-owned, scoped URLs.
 func (i *instance) streamAlias(w http.ResponseWriter, r *http.Request) {
+	if themeParentID(r.PathValue("id")) != "" {
+		name := strings.ToLower(r.PathValue("name"))
+		if name != "stream" && name != "stream.m4a" {
+			http.NotFound(w, r)
+			return
+		}
+		r.SetPathValue("id", themeParentID(r.PathValue("id")))
+		i.themeStream(w, r)
+		return
+	}
 	mediasafety.SetHeaders(w)
 	name := strings.ToLower(r.PathValue("name"))
 	if i.protocol == "emby" && queryBool(r, "Static", false) && (name == "stream" || strings.HasPrefix(name, "stream.")) {

@@ -722,7 +722,7 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		return nil, err
 	}
 	healTimestamps := false
-	if !atCap && proto == core.ProtocolHLS && (d.Container == ContainerMPEGTS || d.Container == ContainerFMP4) {
+	if !(req.LazyStart && req.QualityRungs) && !atCap && proto == core.ProtocolHLS && (d.Container == ContainerMPEGTS || d.Container == ContainerFMP4) {
 		if damaged, heal := m.copyDamage(ctx, req, d, life); damaged {
 			healTimestamps = heal
 			d.Kind, d.VideoCopy, d.VideoCodec = core.DecisionTranscode, false, "h264"
@@ -744,7 +744,40 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 	if ValidCopyTimeline(req) {
 		adapt.FastStart, adapt.Governor, adapt.Ladder = false, false, false
 	}
+	if req.QualityRungs {
+		adapt.Ladder, adapt.LadderUnderCopy = true, true
+	}
 	rungs := buildRungs(req.Info, d, adapt)
+	if req.QualityRungs {
+		rungs = rungs[:1]
+		for _, variant := range req.QualityVariants {
+			rungs = append(rungs, qualityRung(req.Info, variant))
+		}
+	}
+	if req.QualityRungs {
+		allowed := rungs[:1]
+		for _, rung := range rungs[1:] {
+			for _, id := range req.QualityRungIDs {
+				if rung.id == id {
+					allowed = append(allowed, rung)
+					break
+				}
+			}
+		}
+		rungs = allowed
+	}
+	if req.LadderVideoCodecs != nil {
+		allowed := rungs[:1]
+		for _, rung := range rungs[1:] {
+			for _, codec := range req.LadderVideoCodecs {
+				if rung.decision.VideoCodec == codec {
+					allowed = append(allowed, rung)
+					break
+				}
+			}
+		}
+		rungs = allowed
+	}
 	if proto == core.ProtocolHLS && d.Container == ContainerMatroska && len(rungs) > 1 {
 		// Plex's native player probes every rendition's initialization and
 		// early segments concurrently. These rungs share one encoder, so
@@ -849,6 +882,9 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		// the playlist clock), or with no later keyframe the copy published
 		// nothing and the playlist's tail failed. An unindexed copy keeps one
 		// copy plan from its first segment instead, like fMP4 and Matroska.
+		if req.Continuous {
+			adapt.FastStart, adapt.Governor = false, false
+		}
 		fastStart := !req.LiveInput && adapt.FastStart && v != nil && (!d.VideoCopy || (d.Container == ContainerMPEGTS && len(req.Info.Keyframes) > 0))
 		plan = buildTimeline(span, segDur, timelineOptions{
 			steadyMode:      steadyMode,
@@ -936,6 +972,7 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		softSubtitleStream = &index
 	}
 	s := &Session{
+		serialRungs:             req.QualityRungs,
 		androidMatroskaHLS:      d.AndroidMatroskaHLS,
 		healTimestamps:          healTimestamps,
 		encoder:                 life,
@@ -947,6 +984,10 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		total:                   total,
 		container:               d.Container,
 		proto:                   proto,
+		diagnosticsEnabled:      req.Diagnostics,
+		outputCodecs:            map[int]string{},
+		outputInit:              map[int]string{},
+		outputAudioChannels:     map[int]int{},
 		requireIndependentProof: req.RequireIndependentProof,
 		log:                     m.log.With("session", id, "initialRelease", req.ReleaseID),
 		created:                 time.Now(),
@@ -1034,7 +1075,7 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 	var err error
 	// A ladder has no selected rendition until the first media/init GET.
 	// Avoid encoding an expensive base only to discard it at that GET.
-	if len(rungs) <= 1 || len(warmAt) > 0 {
+	if !req.LazyStart && (len(rungs) <= 1 || len(warmAt) > 0) {
 		err = s.startRunForLocked(startSeg, false, "session start")
 	}
 	s.mu.Unlock()
@@ -1352,4 +1393,10 @@ func (t *tailWriter) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.buf)
+}
+
+// AudioFallbackAvailable requires the actual AAC encoder and fragmented MP4
+// segment muxers discovered at startup. Unknown inventory fails closed.
+func (m *Manager) AudioFallbackAvailable() bool {
+	return m.ffmpeg != "" && m.feat.encoders["aac"] && m.feat.muxers["hls"] && m.feat.muxers["mp4"]
 }
