@@ -1074,6 +1074,17 @@ func (b *broadcast) step(now time.Time) bool {
 		b.origin = time.Now()
 		return false
 	}
+	// Scheduled off-air owns the opening picture just like a scheduled title.
+	// Its decoder opens asynchronously: do not publish the generic signal
+	// screen while waiting for that first frame. Keep the original clock so
+	// preparation cannot extend the scheduled end, and bound cold admission
+	// by the same first-segment deadline used for opening graphics.
+	if frame.Video == nil && b.tick == 0 && !introActive && current.element == offAirSlate && !current.end.IsZero() {
+		if time.Since(b.created) >= b.segment*3/4 {
+			b.cancel()
+		}
+		return false
+	}
 	// A live input cannot be read ahead of its provider. Its startup burst
 	// ends at the first tick without a decoded picture instead of waiting for
 	// one (publication must not pause) or running a screen ahead of the clock.

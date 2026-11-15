@@ -599,7 +599,7 @@ func (p *scheduleBroadcastPlanner) introPlan(now time.Time) (broadcastPlan, time
 		if now.Before(programme.Start) || !now.Before(programme.End) {
 			continue
 		}
-		if interstitial(programme.Item) {
+		if interstitial(programme.Item) || programme.Item.Slate == offAirSlate {
 			p.mu.Unlock()
 			return broadcastPlan{}, 0
 		}
