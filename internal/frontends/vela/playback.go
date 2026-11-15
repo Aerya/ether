@@ -69,7 +69,7 @@ func (i *instance) access(r *http.Request, v *frontend.Viewer) frontend.SessionA
 func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	v, token, e := i.viewer(r)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	var b struct {
@@ -119,7 +119,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	}
 	scope, e := i.grantScope(r.Context(), token, requestDevice(r))
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	options := frontend.DecideOptions{MaxWidth: b.Client.MaxWidth, MaxHeight: b.Client.MaxHeight, MaxBitrateKbps: b.Client.MaxBitrate / 1000, DirectPlay: true, DirectStream: b.Client.HLS || b.Client.MSE, AudioStream: -1, SubtitleStream: -1}
@@ -155,7 +155,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	}
 	declared, e := i.clientCapabilities(r, v, b.Client)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	var item frontend.RatingKey
@@ -174,7 +174,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 		if b.PositionSeconds == nil {
 			states, err := i.host.Experience.UserData(r.Context(), v, []frontend.RatingKey{item})
 			if err != nil {
-				fail(w, err)
+				fail(w, err, r)
 				return
 			}
 			pos = states[item].ViewOffset
@@ -186,7 +186,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, e := i.host.Sessions.Plan(r.Context(), frontend.PlanRequest{Protocol: "vela", Viewer: v, Device: requestDevice(r), Item: item, Channel: b.ChannelID, Caps: declared.Client, Intent: frontend.PlayIntent{Options: options, AudioSet: audioSet, SubtitleSet: subtitleSet, Position: pos, AllowTranscoding: b.AllowTranscode, DeclaredCaps: true, OriginalPlayback: b.Client.OriginalPlayback}})
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	if plan.Estimated {
@@ -195,7 +195,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	}
 	s, e := i.host.Sessions.Open(r.Context(), frontend.OpenRequest{Protocol: "vela", PlanID: plan.ID, Viewer: v, Device: requestDevice(r)})
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	if b.ChannelID != "" && s.Media != nil && !s.Media.Estimated {
@@ -217,7 +217,7 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 	url, e := i.host.Sessions.StartStream(r.Context(), i.access(r, v), s.ID, frontend.StreamRequest{Format: format, Position: pos, LazyStart: true, Continuous: true})
 	if e != nil {
 		_ = i.host.Sessions.Stop(r.Context(), i.access(r, v), s.ID)
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	kind := "direct"
@@ -310,12 +310,12 @@ func (i *instance) playback(w http.ResponseWriter, r *http.Request) {
 func (i *instance) session(w http.ResponseWriter, r *http.Request) (*frontend.Viewer, *playSession) {
 	v, token, e := i.viewer(r)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return nil, nil
 	}
 	scope, e := i.grantScope(r.Context(), token, requestDevice(r))
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return nil, nil
 	}
 	i.mu.Lock()
@@ -418,7 +418,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 	switch b.Kind {
 	case "stop":
 		if e := i.host.Sessions.Stop(r.Context(), i.access(r, v), id); e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		s.ended = time.Now()
@@ -469,7 +469,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		}
 		url, err := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: format, Position: origin, LazyStart: true, Continuous: true})
 		if err != nil {
-			fail(w, err)
+			fail(w, err, r)
 			return
 		}
 		for _, previous := range paths {
@@ -509,7 +509,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, extra := s.plan["extraId"]; extra {
 			if e := i.host.Sessions.Report(r.Context(), i.access(r, v), id, frontend.Timeline{Position: pos, State: "playing"}); e != nil {
-				fail(w, e)
+				fail(w, e, r)
 				return
 			}
 			s.position = pos
@@ -521,7 +521,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		if path["transport"] == "hls" {
 			url, e := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: frontend.StreamHLS, Position: pos, LazyStart: true, Continuous: true})
 			if e != nil {
-				fail(w, e)
+				fail(w, e, r)
 				return
 			}
 			if rung := s.rungFor(path); rung != "" {
@@ -581,7 +581,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 		}
 		url, err := i.host.Sessions.StartStream(r.Context(), i.access(r, v), id, frontend.StreamRequest{Format: frontend.StreamHLS, Position: s.position, LazyStart: true, Continuous: true, AudioStream: audio, SubtitleStream: sub, BurnImageSubtitles: true})
 		if err != nil {
-			fail(w, err)
+			fail(w, err, r)
 			return
 		}
 		paths := s.plan["paths"].([]object)
@@ -644,7 +644,7 @@ func (i *instance) command(w http.ResponseWriter, r *http.Request) {
 			state = "playing"
 		}
 		if e := i.host.Sessions.Report(r.Context(), i.access(r, v), id, frontend.Timeline{Position: s.position, State: state}); e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		s.plan["state"] = state
@@ -737,7 +737,7 @@ func (i *instance) observe(w http.ResponseWriter, r *http.Request) {
 		subtitleIndex = &n
 	}
 	if e := i.host.Sessions.Report(r.Context(), i.access(r, v), r.PathValue("id"), frontend.Timeline{Sequence: b.Sequence, Position: pos, State: b.State, AudioStreamIndex: audioIndex, SubtitleStreamIndex: subtitleIndex}); e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 
@@ -762,7 +762,7 @@ func (i *instance) observe(w http.ResponseWriter, r *http.Request) {
 	}
 	if b.State == "ended" {
 		if e := i.host.Sessions.Stop(r.Context(), i.access(r, v), r.PathValue("id")); e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		s.ended = time.Now()

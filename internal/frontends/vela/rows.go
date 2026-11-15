@@ -43,6 +43,7 @@ func (i *instance) rowPage(r *http.Request, v *frontend.Viewer, id string, offse
 	if e != nil {
 		return frontend.Row{}, e
 	}
+	noteBootstrapDeadline(r, page.ExpiresAt)
 	kind := ""
 	if page.Truncated {
 		kind = "truncated"

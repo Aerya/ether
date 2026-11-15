@@ -33,13 +33,13 @@ func (i *instance) extraPlayback(w http.ResponseWriter, r *http.Request, v *fron
 	}
 	scope, err := i.grantScope(r.Context(), token, requestDevice(r))
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	profile := caps.DeviceProfile{MaxStreamingBitrate: c.MaxBitrate, DirectPlayProfiles: []caps.DirectPlayProfile{{Type: "Video", Container: strings.Join(c.Containers, ","), VideoCodec: strings.Join(c.VideoCodecs, ","), AudioCodec: strings.Join(c.AudioCodecs, ",")}}}
 	declared, err := i.host.Capabilities.Build(i.identityContext(r), frontend.CapabilityRequest{Viewer: v, Device: caps.DeviceInfo{Protocol: "vela", Platform: c.Device.Platform, Version: c.Device.AppVersion, ClientID: requestDevice(r).ID, DeviceName: c.Device.Name, VideoCodecs: c.VideoCodecs, AudioCodecs: c.AudioCodecs, Containers: c.Containers, MaxHeight: c.MaxHeight, MaxBitrateKbps: c.MaxBitrate / 1000}, Profile: profile, UserAgent: r.UserAgent()})
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	lang := ""
@@ -48,7 +48,7 @@ func (i *instance) extraPlayback(w http.ResponseWriter, r *http.Request, v *fron
 	}
 	result, err := i.host.Sessions.(frontend.ExtraPlaybacks).ExtraPlayback(r.Context(), frontend.TrailerPreviewRequest{Viewer: v, Device: requestDevice(r), Protocol: "vela", Item: item, IdempotencyKey: idempotency, Language: lang, Caps: declared.Client})
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	if result.State == "preparing" {

@@ -39,7 +39,7 @@ func (i *instance) aiSearchScope(r *http.Request, v *frontend.Viewer, token stri
 func (i *instance) startAISearch(w http.ResponseWriter, r *http.Request) {
 	v, token, err := i.viewer(r)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	if !i.aiSearchAvailable() {
@@ -56,12 +56,12 @@ func (i *instance) startAISearch(w http.ResponseWriter, r *http.Request) {
 	}
 	scope, err := i.aiSearchScope(r, v, token)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	var nonce [24]byte
 	if _, err = rand.Read(nonce[:]); err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	now := time.Now()
@@ -175,7 +175,7 @@ func (i *instance) cancelAISearch(w http.ResponseWriter, r *http.Request) { i.re
 func (i *instance) readAISearch(w http.ResponseWriter, r *http.Request, cancel bool) {
 	v, token, err := i.viewer(r)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	if !i.aiSearchAvailable() {
@@ -184,7 +184,7 @@ func (i *instance) readAISearch(w http.ResponseWriter, r *http.Request, cancel b
 	}
 	scope, err := i.aiSearchScope(r, v, token)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	var b struct{ Generation int }
@@ -226,14 +226,14 @@ func (i *instance) readAISearch(w http.ResponseWriter, r *http.Request, cancel b
 				continue
 			}
 			if e != nil {
-				fail(w, e)
+				fail(w, e, r)
 				return
 			}
 			items = append(items, detail.Title)
 		}
 		titles, e := i.titles(r, v, token, items)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		continuation := page.Continuation

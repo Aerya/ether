@@ -40,22 +40,22 @@ func libraryWire(view frontend.View) object {
 func (i *instance) libraries(w http.ResponseWriter, r *http.Request) {
 	v, token, err := i.viewer(r)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	views, err := i.host.Experience.Views(r.Context(), v)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	scope, err := i.livePageScope(r, v, token)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	c, err := i.readLiveCursor(r, scope, hashJSON([]any{"libraries", limit(r)}))
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	snapshot := hashJSON(views)
@@ -73,7 +73,7 @@ func (i *instance) libraries(w http.ResponseWriter, r *http.Request) {
 	if end < len(views) {
 		next, e := i.nextLiveCursor(c, end, snapshot)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		page["continuation"], page["nextCursor"] = "more", next
@@ -166,12 +166,12 @@ func libraryQuery(r *http.Request, library object) (frontend.ItemQuery, string, 
 func (i *instance) libraryItems(w http.ResponseWriter, r *http.Request) {
 	v, token, err := i.viewer(r)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	views, err := i.host.Experience.Views(r.Context(), v)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	id := r.PathValue("id")
@@ -197,12 +197,12 @@ func (i *instance) libraryItems(w http.ResponseWriter, r *http.Request) {
 	}
 	scope, err := i.livePageScope(r, v, token)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	c, err := i.readLiveCursor(r, scope, hashJSON([]any{"library-items", id, q}))
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	snapshot := hashJSON(views)
@@ -213,7 +213,7 @@ func (i *instance) libraryItems(w http.ResponseWriter, r *http.Request) {
 	q.Offset = c.Offset
 	page, err := i.host.Experience.LibraryItems(r.Context(), v, requestDevice(r), id, q)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	if len(page.Items) > q.Limit {
@@ -221,7 +221,7 @@ func (i *instance) libraryItems(w http.ResponseWriter, r *http.Request) {
 	}
 	converted, err := i.titles(r, v, token, page.Items)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	entries := []object{}
@@ -237,13 +237,13 @@ func (i *instance) libraryItems(w http.ResponseWriter, r *http.Request) {
 		nextQuery.Limit = 1
 		more, e := i.host.Experience.LibraryItems(r.Context(), v, requestDevice(r), id, nextQuery)
 		if e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 		if len(more.Items) > 0 {
 			next, e := i.nextLiveCursor(c, nextQuery.Offset, snapshot)
 			if e != nil {
-				fail(w, e)
+				fail(w, e, r)
 				return
 			}
 			out["continuation"], out["nextCursor"] = "more", next

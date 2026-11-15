@@ -51,7 +51,7 @@ func (i *instance) tokenResult(w http.ResponseWriter, r *http.Request, access, r
 	case errors.Is(err, errPending):
 		problem(out, 409, "conflict", "mutation_outcome_unknown")
 	case err != nil:
-		fail(out, err)
+		fail(out, err, r)
 	case conflict:
 		problem(out, 409, "conflict", "idempotency_conflict")
 	case saved != nil:
@@ -66,7 +66,7 @@ func (i *instance) tokenResult(w http.ResponseWriter, r *http.Request, access, r
 		}
 		if err != nil {
 			_ = i.host.Identity.Revoke(r.Context(), access)
-			fail(out, err)
+			fail(out, err, r)
 		} else {
 			send(out, 200, object{"accessToken": access, "refreshToken": refresh, "expiresAt": expires.UTC().Format(time.RFC3339), "viewer": viewerWire(v)})
 		}
@@ -93,7 +93,7 @@ func (i *instance) tokenResult(w http.ResponseWriter, r *http.Request, access, r
 func (i *instance) writeTokenResult(w http.ResponseWriter, r *http.Request, access string, d frontend.Device, response savedResponse) {
 	if response.Status == 200 {
 		if _, err := i.grantScope(r.Context(), access, d); err != nil {
-			fail(w, err)
+			fail(w, err, r)
 			return
 		}
 	}

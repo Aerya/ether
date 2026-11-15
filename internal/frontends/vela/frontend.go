@@ -59,10 +59,12 @@ type replay struct {
 	expires time.Time
 }
 type instance struct {
-	db      *sql.DB
-	seal    cipher.AEAD
-	rowMu   sync.Mutex
-	rowMeta map[string]frontend.RowView
+	bootstrapMu sync.Mutex
+	bootstraps  map[string]*bootstrapEntry
+	db          *sql.DB
+	seal        cipher.AEAD
+	rowMu       sync.Mutex
+	rowMeta     map[string]frontend.RowView
 
 	host         frontend.Host
 	ctx          context.Context
@@ -102,7 +104,7 @@ func send(w http.ResponseWriter, status int, v any) {
 func problem(w http.ResponseWriter, status int, class, code string) {
 	send(w, status, object{"error": object{"class": class, "code": code, "message": strings.ReplaceAll(code, "_", " "), "retry": object{"allowed": false}}})
 }
-func fail(w http.ResponseWriter, err error) {
+func fail(w http.ResponseWriter, err error, requests ...*http.Request) {
 	switch {
 	case errors.Is(err, frontend.ErrInteractionReceipt):
 		problem(w, 400, "request", "invalid_receipt")
@@ -145,13 +147,14 @@ func fail(w http.ResponseWriter, err error) {
 			problem(w, 503, "capacity", "rate_limited")
 		}
 	default:
+		logFailure(err, requests...)
 		problem(w, 503, "transient", "service_unavailable")
 	}
 }
 func cache(w http.ResponseWriter, r *http.Request, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	tag := `"` + hash(string(b)+r.Header.Get("Authorization")+r.Header.Get("X-Vela-Device-Id")+r.URL.RequestURI()) + `"`
@@ -219,6 +222,9 @@ func (i *instance) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r = r.WithContext(i.identityContext(r))
+	// Authentication/idempotency can fail before ServeMux dispatches. Record
+	// only its registered route template for those warnings too.
+	_, r.Pattern = i.mux.Handler(r)
 	if r.Method != "POST" && r.Method != "DELETE" {
 		i.mux.ServeHTTP(w, r)
 		return
@@ -250,7 +256,7 @@ func (i *instance) serve(w http.ResponseWriter, r *http.Request) {
 			scope, err = i.grantScope(r.Context(), token, requestDevice(r))
 		}
 		if err != nil {
-			fail(w, err)
+			fail(w, err, r)
 			return
 		}
 	} else {
@@ -303,7 +309,7 @@ func (i *instance) serve(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(claimErr, errPending) {
 			problem(out, 409, "conflict", "mutation_outcome_unknown")
 		} else {
-			fail(out, claimErr)
+			fail(out, claimErr, r)
 		}
 	} else if conflict {
 		problem(out, 409, "conflict", "idempotency_conflict")

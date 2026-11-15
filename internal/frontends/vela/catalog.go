@@ -198,6 +198,7 @@ func (i *instance) homeVisit(r *http.Request, v *frontend.Viewer, token string, 
 		outerMore = len(vv) > limit(r)
 		vv = vv[:min(len(vv), limit(r))]
 		for _, view := range vv {
+			noteBootstrapDeadline(r, view.ExpiresAt)
 			i.rowMu.Lock()
 			if len(i.rowMeta) >= 2000 {
 				i.rowMeta = map[string]frontend.RowView{}
@@ -206,6 +207,9 @@ func (i *instance) homeVisit(r *http.Request, v *frontend.Viewer, token string, 
 			i.rowMu.Unlock()
 			row, e := i.rowPage(r, v, view.ID, 0, rowItemLimit(r))
 			if e != nil {
+				if errors.Is(e, frontend.ErrNotFound) {
+					e = frontend.ErrRowViewStale
+				}
 				return nil, false, e
 			}
 			row.Title = view.Title
@@ -336,24 +340,17 @@ func (i *instance) rowWire(r *http.Request, v *frontend.Viewer, token string, ro
 	return wire, nil
 }
 
-func (i *instance) bootstrap(w http.ResponseWriter, r *http.Request) {
-	v, t, e := i.viewer(r)
-	if e != nil {
-		fail(w, e)
-		return
-	}
+func (i *instance) buildBootstrap(r *http.Request, v *frontend.Viewer, t string, refresh bool) (object, error) {
 	sources := map[string]heroSource{}
-	rows, _, e := i.home(r, v, t, sources)
+	rows, _, e := i.homeVisit(r, v, t, refresh, sources)
 	if e != nil {
-		fail(w, e)
-		return
+		return nil, e
 	}
 	heroes, shelves := heroesFromRows(rows, sources)
 	if len(heroes) < 6 {
 		fill, err := i.heroFallback(r, v, t, heroes, sources)
 		if err != nil {
-			fail(w, err)
-			return
+			return nil, err
 		}
 		if len(fill) > 0 {
 			heroes, shelves = heroesFromRows(append(rows, fill...), sources)
@@ -369,30 +366,27 @@ func (i *instance) bootstrap(w http.ResponseWriter, r *http.Request) {
 			if token, ok := shelf["nextCursor"].(string); ok && token != "" {
 				cursor, err := i.readRowToken(r, v, token)
 				if err != nil {
-					fail(w, err)
-					return
+					return nil, err
 				}
 				cursor.Exclude = ids
 				next := i.sealRowCursor(cursor)
 				if next == "" {
-					problem(w, 503, "transient", "service_unavailable")
-					return
+					return nil, errors.New("vela: cursor encryption failed")
 				}
 				shelf["nextCursor"] = next
 				if err := i.backfillShelf(r, v, t, shelf, rowItemLimit(r)); err != nil {
-					fail(w, err)
-					return
+					return nil, err
 				}
 			}
 		}
 		out["heroes"] = heroes
 	}
-	cache(w, r, out)
+	return out, nil
 }
 func (i *instance) rows(w http.ResponseWriter, r *http.Request) {
 	v, t, e := i.viewer(r)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	if r.PathValue("id") == "" && !noCursor(w, r) {
@@ -400,7 +394,7 @@ func (i *instance) rows(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, more, e := i.home(r, v, t)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	if id := r.PathValue("id"); id != "" {
@@ -422,7 +416,7 @@ func (i *instance) rows(w http.ResponseWriter, r *http.Request) {
 func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 	v, t, e := i.viewer(r)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	k, e := key(r)
@@ -432,7 +426,7 @@ func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 	}
 	d, e := i.host.Experience.Item(r.Context(), frontend.ItemRequest{Viewer: v, Device: requestDevice(r), Key: k})
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	extras := []object{}
@@ -453,7 +447,7 @@ func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 	}
 	ts, e := i.titles(r, v, t, []frontend.Title{d.Title})
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	if theme := i.detailTheme(r, t, d.Title); theme != nil {
@@ -462,12 +456,12 @@ func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 	ts[0]["watch"] = watchWire(d.UserData)
 	cast, e := i.cast(r, t, d)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	crew, e := i.crew(r, t, d)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	out := object{"title": ts[0], "extras": extras, "chapters": []object{}, "cast": cast, "crew": crew}
@@ -478,7 +472,7 @@ func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 		out["mediaSummary"] = summary
 	}
 	if err := i.detailChildren(r, v, t, d, out); err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	i.warmDetail(r, v, d)
@@ -487,7 +481,7 @@ func (i *instance) detail(w http.ResponseWriter, r *http.Request) {
 func (i *instance) children(w http.ResponseWriter, r *http.Request) {
 	v, t, e := i.viewer(r)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	if !noCursor(w, r) {
@@ -500,12 +494,12 @@ func (i *instance) children(w http.ResponseWriter, r *http.Request) {
 	}
 	p, e := i.host.Experience.Children(r.Context(), v, requestDevice(r), k, frontend.ItemQuery{Limit: limit(r), NoTotal: true})
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	ts, e := i.titles(r, v, t, p.Items)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	c := "exhausted"
@@ -517,7 +511,7 @@ func (i *instance) children(w http.ResponseWriter, r *http.Request) {
 func (i *instance) search(w http.ResponseWriter, r *http.Request) {
 	v, t, e := i.viewer(r)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	var b struct {
@@ -553,12 +547,12 @@ func (i *instance) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	ts, e := i.titles(r, v, t, p.Page.Items)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	out := object{"query": b.Query, "generation": b.Generation, "items": ts, "continuation": p.Continuation}
@@ -570,7 +564,7 @@ func (i *instance) search(w http.ResponseWriter, r *http.Request) {
 func (i *instance) interactions(w http.ResponseWriter, r *http.Request) {
 	v, _, e := i.viewer(r)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	var b struct {
@@ -603,7 +597,7 @@ func (i *instance) interactions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if e = reporter.ReportRowInteraction(r.Context(), frontend.RowInteraction{Viewer: v, Device: requestDevice(r), Protocol: "vela", Handle: x.ReceiptToken, Kind: kind}); e != nil {
-			fail(w, e)
+			fail(w, e, r)
 			return
 		}
 	}
@@ -612,7 +606,7 @@ func (i *instance) interactions(w http.ResponseWriter, r *http.Request) {
 func (i *instance) watch(w http.ResponseWriter, r *http.Request) {
 	v, _, e := i.viewer(r)
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	k, e := key(r)
@@ -621,7 +615,7 @@ func (i *instance) watch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, e = i.host.Experience.Item(r.Context(), frontend.ItemRequest{Viewer: v, Device: requestDevice(r), Key: k}); e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	var b struct{ Played, Favorite, Watchlisted *bool }
@@ -643,7 +637,7 @@ func (i *instance) watch(w http.ResponseWriter, r *http.Request) {
 		e = i.host.Experience.SetWatchlist(r.Context(), v, k, *b.Watchlisted)
 	}
 	if e != nil {
-		fail(w, e)
+		fail(w, e, r)
 		return
 	}
 	send(w, 200, object{"accepted": true})

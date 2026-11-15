@@ -30,7 +30,7 @@ func (i *instance) audioFallback(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if r.Method == http.MethodDelete {
 		if err := audio.StopAudioFallback(r.Context(), i.access(r, v), id, r.PathValue("audioId")); err != nil {
-			fail(w, err)
+			fail(w, err, r)
 			return
 		}
 		send(w, 200, object{"accepted": true})
@@ -56,7 +56,7 @@ func (i *instance) audioFallback(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := audio.StartAudioFallback(r.Context(), i.access(r, v), id, track, pos)
 	if err != nil {
-		fail(w, err)
+		fail(w, err, r)
 		return
 	}
 	if selected := strconv.Itoa(track); s.plan["selectedAudioTrackId"] != selected {
