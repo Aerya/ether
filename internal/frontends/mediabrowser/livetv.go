@@ -2,6 +2,7 @@ package mediabrowser
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/braedonsaunders/ether/internal/contentrating"
 	"github.com/braedonsaunders/ether/internal/frontend"
@@ -75,8 +76,9 @@ func (i *instance) channelDTO(r *http.Request, token string, ch frontend.LiveCha
 		tags = append(tags, g.Name)
 	}
 	item := map[string]any{
-		"Tags": tags,
-		"Id":   id, "Name": ch.Name, "Number": ch.Number, "Type": "TvChannel",
+		"Tags":     tags,
+		"ServerId": i.info.ID,
+		"Id":       id, "Name": ch.Name, "Number": ch.Number, "Type": "TvChannel",
 		"ChannelType": "TV", "MediaType": "Video", "IsFolder": false,
 		"MediaSources": []any{i.liveChannelMediaSourceDTO(id, ch.Name)},
 		"UserData":     map[string]any{"Key": id, "IsFavorite": ch.Favorite},
@@ -347,7 +349,8 @@ func (i *instance) programmeDTO(p frontend.LiveProgramme, channel frontend.LiveC
 		return nil, false
 	}
 	item := map[string]any{
-		"Id": id, "ChannelId": channelID, "Name": p.Title, "Overview": p.Summary, "Type": "Program",
+		"ServerId": i.info.ID,
+		"Id":       id, "ChannelId": channelID, "Name": p.Title, "Overview": p.Summary, "Type": "Program",
 		"StartDate": wireTime(p.Start), "EndDate": wireTime(p.End), "OfficialRating": contentrating.Prefixed(p.Rating),
 		"IndexNumber": p.Episode, "ParentIndexNumber": p.Season, "Genres": append([]string{}, p.Genres...), "IsMovie": frontend.LiveCategory(p.Genres, "movie", p.MediaType), "IsSeries": frontend.LiveCategory(p.Genres, "series", p.MediaType) || p.Episode > 0 || p.Season > 0,
 		"IsSports": frontend.LiveCategory(p.Genres, "sports", p.MediaType), "IsNews": frontend.LiveCategory(p.Genres, "news", p.MediaType), "IsKids": frontend.LiveCategory(p.Genres, "kids", p.MediaType),
@@ -445,6 +448,47 @@ func (i *instance) channel(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonReply(w, item)
 }
+
+// Jellyfin web posts the guide query to avoid putting every channel id in
+// the URL. Reuse the same viewer-scoped query and filters as GET.
+func (i *instance) postProgrammes(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	if r.Body == nil || decode(r, &body) != nil || body == nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	q := r.URL.Query()
+	for name, value := range body {
+		switch strings.ToLower(name) {
+		case "channelids", "minstartdate", "maxstartdate", "minenddate", "maxenddate", "startindex", "limit", "ismovie", "isseries", "issports", "isnews", "iskids":
+		default:
+			continue
+		}
+		if value == nil || len(route.Query(q, name)) != 0 {
+			continue
+		}
+		switch v := value.(type) {
+		case string, bool, float64:
+			q.Set(name, fmt.Sprint(v))
+		case []any:
+			for _, element := range v {
+				text, ok := element.(string)
+				if !ok {
+					http.Error(w, "Bad Request", http.StatusBadRequest)
+					return
+				}
+				q.Add(name, text)
+			}
+		default:
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+	}
+	r = r.Clone(r.Context())
+	r.URL.RawQuery = q.Encode()
+	i.programmes(w, r)
+}
+
 func (i *instance) programmes(w http.ResponseWriter, r *http.Request) {
 	viewer, _, err := i.viewer(r)
 	if err != nil || viewer == nil {
@@ -461,7 +505,7 @@ func (i *instance) programmes(w http.ResponseWriter, r *http.Request) {
 	for _, p := range []struct {
 		name string
 		dest *time.Time
-	}{{"MinStartDate", &q.From}, {"MaxStartDate", &q.Until}} {
+	}{{"MinEndDate", &q.From}, {"MinStartDate", &q.From}, {"MaxEndDate", &q.Until}, {"MaxStartDate", &q.Until}} {
 		values := route.Query(r.URL.Query(), p.name)
 		if len(values) > 1 {
 			http.Error(w, "Bad Request", 400)
@@ -497,7 +541,10 @@ func (i *instance) programmes(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unavailable", 503)
 		return
 	}
-	i.writeProgrammes(w, r, viewer, rows, queryInt(r, "StartIndex", 0), queryInt(r, "Limit", 100))
+	// The guide asks for every programme in its selected channel window.
+	// An omitted Limit is unbounded, as on Jellyfin, rather than silently
+	// dropping all but the first 100 programmes.
+	i.writeProgrammes(w, r, viewer, rows, queryInt(r, "StartIndex", 0), queryInt(r, "Limit", 0))
 }
 
 func (i *instance) recommendedProgrammes(w http.ResponseWriter, r *http.Request) {
