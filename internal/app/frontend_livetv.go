@@ -409,3 +409,14 @@ func (s surfaceLiveTV) LogoKey() []byte {
 }
 
 var _ frontend.LiveTV = surfaceLiveTV{}
+
+func (s surfaceLiveTV) FilterDiscovery(ctx context.Context, u *frontend.User, ps []frontend.LiveTVProgramme) ([]frontend.LiveTVProgramme, []frontend.LiveTVChannel, error) {
+	viewer, err := s.viewer(ctx, u)
+	if err != nil {
+		return nil, nil, err
+	}
+	if h, ok := s.host().(frontend.LiveTVDiscoveryPolicy); ok {
+		return h.FilterDiscovery(core.WithLiveApp(ctx, s.surface), viewer, ps)
+	}
+	return nil, nil, frontend.ErrNotAvailable
+}

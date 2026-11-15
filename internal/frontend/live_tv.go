@@ -224,3 +224,9 @@ type LiveSearchResults struct {
 	Programmes        []LiveTVProgramme
 	ProgrammeChannels []LiveTVChannel
 }
+
+// LiveTVDiscoveryPolicy rechecks a bounded cached shelf against current viewer,
+// channel, guide visibility and programme safety policy.
+type LiveTVDiscoveryPolicy interface {
+	FilterDiscovery(context.Context, *User, []LiveTVProgramme) ([]LiveTVProgramme, []LiveTVChannel, error)
+}

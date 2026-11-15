@@ -642,13 +642,13 @@ type GridChannelFilter struct {
 type Feature struct {
 	PromotedGridChannelFilter []GridChannelFilter `plex:"PromotedGridChannelFilter"`
 	GridChannelFilter         []GridChannelFilter `plex:"GridChannelFilter"`
-	Flavor            string              `plex:"flavor,omitempty"`
-	ScrobbleKey       string              `plex:"scrobbleKey,omitempty"`
-	UnscrobbleKey     string              `plex:"unscrobbleKey,omitempty"`
-	Key               string              `plex:"key,omitempty"`
-	Type              string              `plex:"type"`
-	Directory         []ProviderDirectory `plex:"Directory"`
-	Action            []Action            `plex:"Action"`
+	Flavor                    string              `plex:"flavor,omitempty"`
+	ScrobbleKey               string              `plex:"scrobbleKey,omitempty"`
+	UnscrobbleKey             string              `plex:"unscrobbleKey,omitempty"`
+	Key                       string              `plex:"key,omitempty"`
+	Type                      string              `plex:"type"`
+	Directory                 []ProviderDirectory `plex:"Directory"`
+	Action                    []Action            `plex:"Action"`
 }
 
 type Action struct {

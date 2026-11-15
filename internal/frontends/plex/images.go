@@ -3,13 +3,11 @@ package plex
 import (
 	"context"
 	"encoding/base64"
-	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -404,10 +402,6 @@ func (s *Server) handlePhotoTranscode(w http.ResponseWriter, r *http.Request) {
 		s.serveRemoteImage(w, r, resizeTMDBURL(u.String(), width))
 		return
 	}
-	if u.IsAbs() && u.Scheme == "https" && s.liveTVExternalArtworkAllowed(r, u) {
-		s.serveRemoteImage(w, r, u.String())
-		return
-	}
 	// Android may wrap an artwork URL from a previous local/remote/relay
 	// connection. Resolve only known server artwork routes under the OUTER
 	// viewer; never dial that hostname or use credentials from the nested URL.
@@ -495,37 +489,6 @@ func (s *Server) isSelfHost(r *http.Request, host string) bool {
 	}
 	name = strings.Trim(name, "[]")
 	return name == "localhost" || name == "127.0.0.1" || name == "::1" || strings.HasSuffix(name, ".plex.direct")
-}
-
-func (s *Server) liveTVExternalArtworkAllowed(r *http.Request, u *url.URL) bool {
-	user := FromContext(r.Context()).User
-	if !s.liveTVEnabled() || !s.svc().liveTV.VisibleTo(r.Context(), user) {
-		return false
-	}
-	host := strings.ToLower(strings.Trim(u.Hostname(), "[]"))
-	if host == "" || host == "localhost" || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") || strings.HasSuffix(host, ".invalid") {
-		return false
-	}
-	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()) {
-		return false
-	}
-	raw := u.String()
-	if cs, err := s.svc().liveTV.AllowedChannels(r.Context(), user); err == nil {
-		for _, c := range cs {
-			if c.Logo == raw {
-				return true
-			}
-		}
-	}
-	now := s.now()
-	if ps, err := s.svc().liveTV.GuideWindow(r.Context(), user, now.Add(-12*time.Hour), now.Add(48*time.Hour)); err == nil {
-		for _, p := range ps {
-			if p.Item.Thumb == raw {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // allowedImageHost limits the proxy to the artwork CDN, so it is not an
