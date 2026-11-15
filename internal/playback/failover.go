@@ -61,7 +61,7 @@ func (m *Manager) preparedResolution(ctx context.Context, s *session, profile co
 			}
 		}
 	}
-	if res != nil && (slices.Contains(s.caps.BroadcastExclude, res.Release.ID) || !m.channelSourceAllowed(s, res.Release) || m.titleReleaseRejected(ctx, s.ident.key, res.Release)) {
+	if res != nil && (!m.ownerPinAllows(s, res.Release.ID) || slices.Contains(s.caps.BroadcastExclude, res.Release.ID) || !m.channelSourceAllowed(s, res.Release) || m.titleReleaseRejected(ctx, s.ident.key, res.Release)) {
 		return nil, nil, false
 	}
 	if res != nil && (!m.rememberedReleaseMatchesTitle(ctx, res.Release, s.title) || !payloadMatchesTitle(res.NZB, s.title)) {
@@ -323,7 +323,7 @@ func (m *Manager) nextResolution(ctx context.Context, s *session, tried []string
 		var fetchErr error
 		fetched := 0
 		for i, alt := range alternates {
-			if alt.ID == "" || !m.channelSourceAllowed(s, alt) || m.titleReleaseRejected(ctx, s.ident.key, alt) || m.releaseNamesakeRejected(ctx, s, alt) || slices.Contains(tried, alt.ID) || !releaseMatchesTitle(alt, s.title) {
+			if alt.ID == "" || !m.ownerPinAllows(s, alt.ID) || !m.channelSourceAllowed(s, alt) || m.titleReleaseRejected(ctx, s.ident.key, alt) || m.releaseNamesakeRejected(ctx, s, alt) || slices.Contains(tried, alt.ID) || !releaseMatchesTitle(alt, s.title) {
 				continue
 			}
 			if fetched >= m.opts.MaxAttempts {
@@ -421,6 +421,9 @@ func allowsH264Transcode(c core.ClientCaps) bool {
 // marked bad. When the probe fails for another reason, fallback supplies the
 // media info.
 func (m *Manager) openGeneration(ctx context.Context, s *session, res *core.Resolution, fallback func(size int64) core.MediaInfo, cached ...*probeCache) (*generation, error) {
+	if !m.ownerPinAllows(s, res.Release.ID) {
+		return nil, fmt.Errorf("%w: owner pinned a different release", core.ErrNotAvailable)
+	}
 	if slices.Contains(s.caps.BroadcastExclude, res.Release.ID) || !m.channelSourceAllowed(s, res.Release) {
 		return nil, fmt.Errorf("%w: source exceeds channel delivery budget", core.ErrNotAvailable)
 	}
