@@ -17,6 +17,12 @@ type TrailerPreviewAvailability interface{ TrailerPreviewAvailable() bool }
 type TrailerPreviews interface {
 	TrailerPreview(context.Context, TrailerPreviewRequest) (TrailerPreviewResult, error)
 }
+
+// TrailerPreviewStatuses polls an existing intent without starting preparation.
+type TrailerPreviewStatuses interface {
+	TrailerPreviewStatus(context.Context, TrailerPreviewRequest) (TrailerPreviewResult, error)
+}
+
 type TrailerPreviewRequest struct {
 	Viewer   *core.Viewer
 	Device   core.Device

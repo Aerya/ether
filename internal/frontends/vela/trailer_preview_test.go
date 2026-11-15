@@ -20,11 +20,20 @@ type previewBrokerFake struct {
 	previewBaseSessions
 	result frontend.TrailerPreviewResult
 	calls  int
+	polls  int
 }
 
 func (f *previewBrokerFake) TrailerPreviewAvailable() bool { return true }
 func (f *previewBrokerFake) TrailerPreview(_ context.Context, req frontend.TrailerPreviewRequest) (frontend.TrailerPreviewResult, error) {
 	f.calls++
+	if req.Viewer == nil || req.Viewer.ID != 1 || req.Device.ID != "device" || req.Protocol != "vela" || req.Item != core.MovieKey(9) {
+		return frontend.TrailerPreviewResult{}, core.ErrUnauthorized
+	}
+	return f.result, nil
+}
+
+func (f *previewBrokerFake) TrailerPreviewStatus(_ context.Context, req frontend.TrailerPreviewRequest) (frontend.TrailerPreviewResult, error) {
+	f.polls++
 	if req.Viewer == nil || req.Viewer.ID != 1 || req.Device.ID != "device" || req.Protocol != "vela" || req.Item != core.MovieKey(9) {
 		return frontend.TrailerPreviewResult{}, core.ErrUnauthorized
 	}
@@ -71,11 +80,35 @@ func TestTrailerPreviewIsolation(t *testing.T) {
 	}
 	request := object{"idempotencyKey": "focus", "client": object{"device": object{"id": "device"}, "protocolVersions": []int{0}, "containers": []string{"mp4"}, "videoCodecs": []string{"h264"}, "audioCodecs": []string{"aac"}}}
 	title := ids.RatingKeyGUID(core.MovieKey(9))
+	poll := func(dev string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "/vela/v0/titles/"+title+"/trailer-preview", nil)
+		r.SetPathValue("id", title)
+		r.Header.Set("Authorization", "Bearer token")
+		r.Header.Set("X-Vela-Device-Id", dev)
+		w := httptest.NewRecorder()
+		inst.trailerPreviewStatus(w, r)
+		if w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatal("poll can be cached")
+		}
+		return w
+	}
+	if w := poll("device"); w.Code != 404 || broker.calls != 0 || broker.polls != 0 {
+		t.Fatal("poll before POST started work", w.Code)
+	}
 	if w := call(inst.trailerPreview, title, "another", request); w.Code != 400 || broker.calls != 0 {
 		t.Fatal("client device mismatch accepted", w.Code)
 	}
 	if w := call(inst.trailerPreview, title, "device", request); w.Code != 200 || broker.calls != 1 {
 		t.Fatal("preview issuance failed", w.Code, w.Body.String())
+	}
+	post := call(inst.trailerPreview, title, "device", request)
+	for n := 0; n < 2; n++ {
+		if w := poll("device"); w.Code != 200 || w.Body.String() != post.Body.String() || broker.calls != 2 {
+			t.Fatal("poll changed state or started preparation", w.Code, w.Body.String())
+		}
+	}
+	if w := poll("another"); w.Code != 404 {
+		t.Fatal("poll crossed device", w.Code)
 	}
 	if len(inst.sessions) != 1 || planned != 0 || reports != 0 {
 		t.Fatal("preview opened normal playback")

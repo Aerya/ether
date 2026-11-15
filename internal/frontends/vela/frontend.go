@@ -79,23 +79,24 @@ type instance struct {
 	rowMu           sync.Mutex
 	rowMeta         map[string]frontend.RowView
 
-	host         frontend.Host
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mux          *http.ServeMux
-	assets       string
-	mu           sync.Mutex
-	previewRates map[int64]previewRate
-	themes       map[string]themeGrant
-	sessions     map[string]*playSession
-	replayMu     sync.Mutex
-	replays      map[string]*replay
-	aiMu         sync.Mutex
-	aiJobs       map[string]*aiSearchJob
-	aiActive     int
-	warmMu       sync.Mutex
-	warmClients  map[string]negotiatedClient
-	warmPending  map[string]bool
+	host            frontend.Host
+	ctx             context.Context
+	cancel          context.CancelFunc
+	mux             *http.ServeMux
+	assets          string
+	mu              sync.Mutex
+	previewRates    map[int64]previewRate
+	previewRequests map[previewRequestKey]previewRequest
+	themes          map[string]themeGrant
+	sessions        map[string]*playSession
+	replayMu        sync.Mutex
+	replays         map[string]*replay
+	aiMu            sync.Mutex
+	aiJobs          map[string]*aiSearchJob
+	aiActive        int
+	warmMu          sync.Mutex
+	warmClients     map[string]negotiatedClient
+	warmPending     map[string]bool
 }
 
 func (i *instance) Handler() http.Handler { return http.HandlerFunc(i.serve) }
@@ -455,6 +456,7 @@ func (i *instance) routes() {
 	i.route("POST", "/interactions", i.interactions)
 	i.route("POST", "/playback", i.playback)
 	i.route("POST", "/titles/{id}/trailer-preview", i.trailerPreview)
+	i.route("GET", "/titles/{id}/trailer-preview", i.trailerPreviewStatus)
 	i.route("POST", "/sessions/{id}/audio-fallback", i.audioFallback)
 	i.route("DELETE", "/sessions/{id}/audio-fallback/{audioId}", i.audioFallback)
 	i.route("GET", "/sessions/{id}", i.snapshot)

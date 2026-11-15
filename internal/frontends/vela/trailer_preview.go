@@ -7,9 +7,67 @@ import (
 	"strings"
 	"time"
 
+	"github.com/braedonsaunders/ether/internal/core"
 	"github.com/braedonsaunders/ether/internal/frontend"
 	"github.com/braedonsaunders/ether/internal/frontend/kit/caps"
 )
+
+type previewRequestKey struct {
+	viewer        int64
+	scope, device string
+	item          core.RatingKey
+}
+
+type previewRequest struct {
+	request frontend.TrailerPreviewRequest
+	expires time.Time
+}
+
+// trailerPreviewStatus rechecks identity, grant scope and broker policy on every
+// poll. Only POST records an intent; GET cannot discover or prepare a trailer.
+func (i *instance) trailerPreviewStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	v, token, err := i.viewer(r)
+	if err != nil {
+		fail(w, err, r)
+		return
+	}
+	item, err := key(r)
+	if err != nil {
+		problem(w, 404, "not-found", "not_found")
+		return
+	}
+	scope, err := i.grantScope(r.Context(), token, requestDevice(r))
+	if err != nil {
+		fail(w, err, r)
+		return
+	}
+	k := previewRequestKey{viewer: v.ID, scope: scope, device: requestDevice(r).ID, item: item}
+	i.mu.Lock()
+	intent, ok := i.previewRequests[k]
+	if ok && !intent.expires.After(time.Now()) {
+		delete(i.previewRequests, k)
+		ok = false
+	}
+	i.mu.Unlock()
+	if !ok {
+		problem(w, 404, "not-found", "not_found")
+		return
+	}
+	status, ok := i.host.Sessions.(frontend.TrailerPreviewStatuses)
+	if !ok || !i.previewAvailable() {
+		send(w, 200, frontend.TrailerPreviewResult{State: "unavailable", Reason: "feature_unavailable"})
+		return
+	}
+	req := intent.request
+	req.Viewer, req.Device = v, requestDevice(r)
+	result, err := status.TrailerPreviewStatus(r.Context(), req)
+	if err != nil {
+		fail(w, err, r)
+		return
+	}
+	i.sendTrailerPreview(w, r, v, scope, result)
+}
 
 type previewRate struct {
 	until time.Time
@@ -57,6 +115,7 @@ func (i *instance) allowPreview(viewer int64) bool {
 // trailerPreview is the only focus/open path that can discover and cache a
 // trailer. Home, row and hero projection never call the broker preview port.
 func (i *instance) trailerPreview(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	v, token, err := i.viewer(r)
 	if err != nil {
 		fail(w, err, r)
@@ -99,11 +158,32 @@ func (i *instance) trailerPreview(w http.ResponseWriter, r *http.Request) {
 	if len(v.AudioLanguages) > 0 {
 		language = v.AudioLanguages[0]
 	}
-	result, err := i.host.Sessions.(frontend.TrailerPreviews).TrailerPreview(r.Context(), frontend.TrailerPreviewRequest{Viewer: v, Device: requestDevice(r), Protocol: "vela", Item: item, IdempotencyKey: b.IdempotencyKey, Language: language, Caps: declared.Client})
+	req := frontend.TrailerPreviewRequest{Viewer: v, Device: requestDevice(r), Protocol: "vela", Item: item, IdempotencyKey: b.IdempotencyKey, Language: language, Caps: declared.Client}
+	i.mu.Lock()
+	if i.previewRequests == nil {
+		i.previewRequests = make(map[previewRequestKey]previewRequest)
+	}
+	for k, old := range i.previewRequests {
+		if k.viewer == v.ID || !old.expires.After(time.Now()) {
+			delete(i.previewRequests, k)
+		}
+	}
+	if len(i.previewRequests) >= 128 {
+		i.mu.Unlock()
+		send(w, 200, frontend.TrailerPreviewResult{State: "unavailable", Reason: "feature_unavailable"})
+		return
+	}
+	i.previewRequests[previewRequestKey{viewer: v.ID, scope: scope, device: req.Device.ID, item: item}] = previewRequest{request: req, expires: time.Now().Add(3 * time.Minute)}
+	i.mu.Unlock()
+	result, err := i.host.Sessions.(frontend.TrailerPreviews).TrailerPreview(r.Context(), req)
 	if err != nil {
 		fail(w, err, r)
 		return
 	}
+	i.sendTrailerPreview(w, r, v, scope, result)
+}
+
+func (i *instance) sendTrailerPreview(w http.ResponseWriter, r *http.Request, v *frontend.Viewer, scope string, result frontend.TrailerPreviewResult) {
 	if result.State == "ready" && result.Grant == nil {
 		problem(w, 503, "transient", "invalid_preview_grant")
 		return
@@ -111,9 +191,11 @@ func (i *instance) trailerPreview(w http.ResponseWriter, r *http.Request) {
 	if result.State == "ready" && result.Grant != nil {
 		g := result.Grant
 		if r.Context().Err() != nil {
-			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
-			defer cancel()
-			_ = i.host.Sessions.Stop(ctx, i.access(r, v), g.SessionID)
+			if r.Method != http.MethodGet {
+				ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+				defer cancel()
+				_ = i.host.Sessions.Stop(ctx, i.access(r, v), g.SessionID)
+			}
 			return
 		}
 		if g.Purpose != "preview" || g.SessionID == "" || !strings.HasPrefix(g.URL, "/sessions/media/") || strings.HasPrefix(g.URL, "//") || !g.ExpiresAt.After(time.Now()) || g.SourceGeneration <= 0 || g.SeekGeneration <= 0 {
@@ -123,6 +205,18 @@ func (i *instance) trailerPreview(w http.ResponseWriter, r *http.Request) {
 		// Keep only command lineage, never a normal movie plan, watcher or receipt.
 		plan := object{"sessionId": g.SessionID, "purpose": "preview", "revision": uint64(1), "sourceGeneration": uint64(g.SourceGeneration), "seekGeneration": uint64(g.SeekGeneration), "state": "ready", "positionSeconds": 0, "paths": []object{}, "selectedPathId": "", "audioTracks": []object{}, "subtitleTracks": []object{}, "selectedSubtitleTrackId": nil, "chapters": []object{}, "fallback": object{"state": "unsupported"}}
 		i.mu.Lock()
+		if current := i.sessions[g.SessionID]; current != nil {
+			current.mu.Lock()
+			active := current.viewer == v.ID && current.device == requestDevice(r).ID && current.scope == scope && current.ended.IsZero()
+			current.mu.Unlock()
+			i.mu.Unlock()
+			if !active {
+				problem(w, 404, "not-found", "not_found")
+				return
+			}
+			send(w, 200, result)
+			return
+		}
 		for id, old := range i.sessions {
 			old.mu.Lock()
 			preview := old.plan["purpose"] == "preview"

@@ -47,6 +47,10 @@ func TestTrailerPreviewPurposeIsolation(t *testing.T) {
 	req := PreviewRequest{Viewer: &core.Viewer{ID: 1}, Device: core.Device{ID: "device"}, Protocol: "jellyfin", Item: core.MovieKey(1), IdempotencyKey: "focus-1"}
 	// Exercise the wrapper used by real adapters too.
 	previews := BindSurface(b, "jellyfin").(frontend.TrailerPreviews)
+	status := BindSurface(b, "jellyfin").(frontend.TrailerPreviewStatuses)
+	if _, err := status.TrailerPreviewStatus(ctx, req); err != nil || fills != 0 || len(b.previewPreparations) != 0 {
+		t.Fatal("status started preparation", err)
+	}
 	result, err := previews.TrailerPreview(ctx, req)
 	if err != nil || result.State != "ready" {
 		t.Fatal(result, err)
@@ -55,7 +59,7 @@ func TestTrailerPreviewPurposeIsolation(t *testing.T) {
 	if grant.Purpose != "preview" || grant.SourceGeneration != 1 || grant.SeekGeneration != 1 {
 		t.Fatal("wrong grant purpose/generations", grant)
 	}
-	retry, err := previews.TrailerPreview(ctx, req)
+	retry, err := status.TrailerPreviewStatus(ctx, req)
 	if err != nil || retry.Grant.SessionID != grant.SessionID || fills != 1 {
 		t.Fatal("idempotent retry changed grant", retry, err)
 	}
@@ -123,9 +127,15 @@ func TestTrailerPreviewPurposeIsolation(t *testing.T) {
 	if err != nil || preparing.State != "preparing" || preparing.Grant != nil || time.Since(started) > time.Second {
 		t.Fatal("cold focus blocked or fabricated a grant", preparing, err)
 	}
+	if polled, err := status.TrailerPreviewStatus(ctx, req); err != nil || polled.State != "preparing" {
+		t.Fatal("pending status changed", polled, err)
+	}
+	b.mu.Lock()
+	done := b.previewPreparations[req.Viewer.ID].done
+	b.mu.Unlock()
 	close(cold)
-	req.IdempotencyKey = "cold-poll"
-	ready, err := previews.TrailerPreview(ctx, req)
+	<-done
+	ready, err := status.TrailerPreviewStatus(ctx, req)
 	if err != nil || ready.State != "ready" || ready.Grant == nil {
 		t.Fatal("prepared focus did not become ready", ready, err)
 	}
