@@ -401,6 +401,12 @@ func (s surfaceLiveTV) GuideChannelLogo(ctx context.Context, c frontend.LiveTVCh
 	}
 	return ""
 }
+func (s surfaceLiveTV) SourceHubGroups(ctx context.Context) ([]frontend.LiveSourceHubGroup, error) {
+	if h, ok := s.host().(frontend.LiveTVSourceHubGroups); ok {
+		return h.SourceHubGroups(ctx)
+	}
+	return nil, nil
+}
 func (s surfaceLiveTV) TuneWithSession(ctx context.Context, u *frontend.User, id string, caps frontend.ClientCaps, sessionID string) (frontend.LiveTVSessionInfo, error) {
 	h := s.host()
 	if h == nil {
@@ -460,3 +466,14 @@ func (s surfaceLiveTV) LogoKey() []byte {
 }
 
 var _ frontend.LiveTV = surfaceLiveTV{}
+
+func (s surfaceLiveTV) FilterDiscovery(ctx context.Context, u *frontend.User, ps []frontend.LiveTVProgramme) ([]frontend.LiveTVProgramme, []frontend.LiveTVChannel, error) {
+	viewer, err := s.viewer(ctx, u)
+	if err != nil {
+		return nil, nil, err
+	}
+	if h, ok := s.host().(frontend.LiveTVDiscoveryPolicy); ok {
+		return h.FilterDiscovery(core.WithLiveApp(ctx, s.surface), viewer, ps)
+	}
+	return nil, nil, frontend.ErrNotAvailable
+}

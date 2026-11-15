@@ -120,6 +120,7 @@ type Service struct {
 	progress         map[string]*progressTracker
 	lineupMu         sync.Mutex
 	lineupIndex      []ChannelSummary
+	lineupOrders     map[string][]int
 	lineupRev        int64
 	coverageMu       sync.Mutex
 	coverageStats    map[guideKey]guideStat

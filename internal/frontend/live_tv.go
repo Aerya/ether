@@ -23,6 +23,17 @@ type LiveTVGuides interface {
 	GuideChannels(context.Context, *core.User, string) ([]LiveTVChannel, error)
 }
 
+// LiveSourceHubGroup identifies a channel group from a source to expose as a What's On shelf.
+type LiveSourceHubGroup struct {
+	SourceID string
+	Group    string
+}
+
+// LiveTVSourceHubGroups optionally exposes source channel groups enabled for What's On shelves.
+type LiveTVSourceHubGroups interface {
+	SourceHubGroups(context.Context) ([]LiveSourceHubGroup, error)
+}
+
 // LiveChannel contains public metadata, never provider URLs or credentials.
 type LiveChannel struct {
 	Guides                               []LiveGuide
@@ -231,4 +242,10 @@ type LiveSearchResults struct {
 	Channels          []LiveTVChannel
 	Programmes        []LiveTVProgramme
 	ProgrammeChannels []LiveTVChannel
+}
+
+// LiveTVDiscoveryPolicy rechecks a bounded cached shelf against current viewer,
+// channel, guide visibility and programme safety policy.
+type LiveTVDiscoveryPolicy interface {
+	FilterDiscovery(context.Context, *User, []LiveTVProgramme) ([]LiveTVProgramme, []LiveTVChannel, error)
 }

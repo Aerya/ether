@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/braedonsaunders/ether/internal/core"
@@ -330,6 +331,45 @@ func (h liveTVHost) GuideChannelLogo(ctx context.Context, c frontend.LiveTVChann
 	return h.s.GuideChannelLogo(ctx, FromFrontendChannel(c))
 }
 
+func (h liveTVHost) SourceHubGroups(ctx context.Context) ([]frontend.LiveSourceHubGroup, error) {
+	srcs, err := h.s.Sources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []frontend.LiveSourceHubGroup
+	for _, src := range srcs {
+		if !src.HubGroups || len(src.Groups) == 0 {
+			continue
+		}
+		byKey := make(map[string]SourceGroup, len(src.Groups))
+		var included []SourceGroup
+		for _, g := range src.Groups {
+			if g.Excluded || strings.TrimSpace(g.Name) == "" {
+				continue
+			}
+			key := strings.ToLower(strings.TrimSpace(g.Name))
+			byKey[key] = g
+			included = append(included, g)
+		}
+		seen := make(map[string]bool, len(included))
+		for _, name := range src.GroupOrder {
+			key := strings.ToLower(strings.TrimSpace(name))
+			if g, ok := byKey[key]; ok && !seen[key] {
+				seen[key] = true
+				out = append(out, frontend.LiveSourceHubGroup{SourceID: src.ID, Group: g.Name})
+			}
+		}
+		for _, g := range included {
+			key := strings.ToLower(strings.TrimSpace(g.Name))
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, frontend.LiveSourceHubGroup{SourceID: src.ID, Group: g.Name})
+			}
+		}
+	}
+	return out, nil
+}
+
 func (h liveTVHost) TuneWithSession(ctx context.Context, u *frontend.User, id string, caps frontend.ClientCaps, sessionID string) (frontend.LiveTVSessionInfo, error) {
 	info, err := h.s.TuneWithSession(ctx, u, id, caps, sessionID)
 	if err != nil {
@@ -377,4 +417,62 @@ func (h liveTVHost) AuthenticateMediaGrant(r *http.Request, active func(context.
 
 func (h liveTVHost) LogoKey() []byte {
 	return nil
+}
+
+func (h liveTVHost) FilterDiscovery(ctx context.Context, u *frontend.User, ps []frontend.LiveTVProgramme) ([]frontend.LiveTVProgramme, []frontend.LiveTVChannel, error) {
+	ids := make([]string, 0, len(ps))
+	seen := map[string]bool{}
+	for _, p := range ps {
+		if !seen[p.ChannelID] {
+			seen[p.ChannelID] = true
+			ids = append(ids, p.ChannelID)
+		}
+	}
+	visible, err := h.s.searchVisibleGuideIDs(ctx, ids)
+	if err != nil {
+		return nil, nil, err
+	}
+	cs, err := h.s.searchAllowedChannels(ctx, u, ids)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx, _, err = h.s.withPolicy(ctx, u)
+	if err != nil {
+		return nil, nil, err
+	}
+	allowed := map[string]Channel{}
+	for _, c := range cs {
+		if visible[c.ID] {
+			allowed[c.ID] = c
+		}
+	}
+	out := []frontend.LiveTVProgramme{}
+	for _, p := range ps {
+		if c, ok := allowed[p.ChannelID]; ok {
+			if p.ID == "" {
+				out = append(out, p)
+				continue
+			}
+			raw := Programme{ID: p.ID, ChannelID: p.ChannelID, Start: p.Start, End: p.End, Item: Item{Key: p.Item.Key, Rating: p.Item.Rating, Genres: p.Item.Genres, MediaType: p.Item.MediaType}}
+			var permitted bool
+			if raw.Item.Key != 0 {
+				// Discovery must never fetch a missing catalogue title on a
+				// client request. Local safety facts are authoritative; missing
+				// facts fail closed and can appear after ordinary preparation.
+				var lookup func(context.Context, core.RatingKey) (*core.Title, error)
+				if cached, ok := h.s.o.Catalog.(interface {
+					CachedGet(context.Context, core.RatingKey) (*core.Title, error)
+				}); ok {
+					lookup = cached.CachedGet
+				}
+				permitted = h.s.allowedWithLookup(ctx, u, c, &raw, lookup, true)
+			} else {
+				permitted = h.s.allowedProgramme(ctx, u, c, &raw)
+			}
+			if p.End.After(h.s.o.Now()) && permitted {
+				out = append(out, p)
+			}
+		}
+	}
+	return out, toFrontendChannels(cs), nil
 }

@@ -231,6 +231,7 @@ export default function LiveTV() {
   const [filter, setFilter] = useState<Filter>("live");
   // One lineup group (exact name); empty shows every group.
   const [group, setGroup] = useState("");
+  const [channelSort, setChannelSort] = useState<"number" | "name" | "id" | "source">("number");
   const [inspected, setInspected] = useState<InspectedProgramme | null>(null);
   const [inspectOpen, setInspectOpen] = useState(false);
   const [previewChannel, setPreviewChannel] = useState<Channel | null>(null);
@@ -259,7 +260,7 @@ export default function LiveTV() {
   const from = useMemo(() => windowStart(shift), [shift]);
   const until = useMemo(() => new Date(from.getTime() + 24 * HOUR), [from]);
   const search = useDebouncedValue(q, 200);
-  const queryKey = `${search}\u0000${filter}\u0000${group}`;
+  const queryKey = `${search}\u0000${filter}\u0000${group}\u0000${channelSort}`;
   const pageState = useRef<{
     key: string;
     loaded: Set<number>;
@@ -303,7 +304,7 @@ export default function LiveTV() {
     pageState.current = state;
     setRows(new Map());
     setPage(null);
-    tv.channelPage({ offset: 0, limit: CHANNELS_PER_PAGE, q: search, filter, group }, ctl.signal)
+    tv.channelPage({ offset: 0, limit: CHANNELS_PER_PAGE, q: search, filter, group, sort: channelSort }, ctl.signal)
       .then((p) => {
         if (ctl.signal.aborted || pageState.current !== state) return;
         state.loaded.add(0);
@@ -316,7 +317,7 @@ export default function LiveTV() {
         if (!ctl.signal.aborted) setError(e);
       });
     return () => ctl.abort();
-  }, [queryKey, pageNonce, search, filter, group]);
+  }, [queryKey, pageNonce, search, filter, group, channelSort]);
 
   const ensureRange = useCallback(
     (start: number, end: number) => {
@@ -329,7 +330,7 @@ export default function LiveTV() {
         if (state.loaded.has(offset) || state.loading.has(offset)) continue;
         state.loading.add(offset);
         tv.channelPage(
-          { offset, limit: CHANNELS_PER_PAGE, q: search, filter, group },
+          { offset, limit: CHANNELS_PER_PAGE, q: search, filter, group, sort: channelSort },
           state.ctl?.signal,
         )
           .then((p) => {
@@ -348,7 +349,7 @@ export default function LiveTV() {
           .finally(() => state.loading.delete(offset));
       }
     },
-    [search, filter, group],
+    [search, filter, group, channelSort],
   );
 
   const handleRange = useCallback(
@@ -860,6 +861,20 @@ export default function LiveTV() {
                   }))}
                   menuClassName="w-48"
                 />
+                {leftTab === "channels" ? (
+                  <ToolbarPicker
+                    ariaLabel={t("Sort channels")}
+                    value={channelSort}
+                    onChange={setChannelSort}
+                    options={[
+                      { value: "number", label: t("Channel #") },
+                      { value: "name", label: t("Channel Name") },
+                      { value: "id", label: t("Channel ID") },
+                      { value: "source", label: t("Source") },
+                    ]}
+                    menuClassName="w-40"
+                  />
+                ) : null}
                 {leftTab === "channels" && channelGroups.length > 0 ? (
                   <ToolbarPicker
                     ariaLabel={t("Group")}
@@ -911,6 +926,7 @@ export default function LiveTV() {
       updateParams,
       channelGroups,
       group,
+      channelSort,
     ],
   );
   const lineupEmpty = channels?.length ? (

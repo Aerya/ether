@@ -1148,6 +1148,7 @@ function groupRules(r: GroupRules): GroupRules {
     newGroups: r.newGroups === "exclude" ? "exclude" : "",
     hideAdult: Boolean(r.hideAdult),
     groupOrder: r.groupOrder?.length ? [...r.groupOrder] : [],
+    hubGroups: Boolean(r.hubGroups),
   };
 }
 
