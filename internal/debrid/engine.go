@@ -1260,8 +1260,8 @@ func (f *remoteFile) finish(idx int64, fl *blockFlight, data []byte, err error, 
 // publishing each block as soon as its bytes arrive.
 func (f *remoteFile) fetchRun(ctx context.Context, first int64, fls []*blockFlight, mode fetchMode, slotHeld bool) {
 	// reqCtx ends when the run is abandoned; httpCtx carries its request.
-	// A nearly finished response may complete into the existing cache after
-	// an early client close or a seek, within the same bounded drain budget.
+	// Only background responses may finish a short remainder into cache,
+	// and they yield immediately when foreground admission needs the host.
 	reqCtx, httpCtx := ctx, ctx
 	var remaining atomic.Int64 // response bytes still unread; -1 before the body
 	remaining.Store(-1)
@@ -1276,7 +1276,7 @@ func (f *remoteFile) fetchRun(ctx context.Context, first int64, fls []*blockFlig
 		finished := make(chan struct{})
 		defer cancelHTTP()
 		defer close(finished)
-		go f.keepWarmOnYield(reqCtx, finished, &remaining, cancelHTTP)
+		go f.keepWarmOnYield(reqCtx, finished, &remaining, mode, cancelHTTP)
 	}
 	httpCtx = context.WithValue(httpCtx, fetchModeKey{}, mode)
 	httpCtx = context.WithValue(httpCtx, playheadDemandKey{}, fls[0].demand)
@@ -1421,12 +1421,8 @@ func (f *remoteFile) fetchRun(ctx context.Context, first int64, fls []*blockFlig
 	f.e.svc.RecordStream(p.Provider, tm.connect, tm.ttfb, got, elapsed)
 }
 
-// A background run displaced by a seek reads its last bytes, up to about a
-// quarter second of transfer, when that is all that stands between its
-// connection and the idle pool: the seek's own request then reuses a warm
-// connection instead of paying a new TCP and TLS handshake to the CDN (or
-// waiting under the host cap for a slot). Anything longer is cut off at
-// once, as before, so it never competes with the seek for bandwidth.
+// An abandoned background run may finish a small remainder to retain a
+// warm connection, but only until foreground admission needs that host.
 const (
 	minYieldDrainBytes = 1 << 20
 	maxYieldDrainBytes = 4 << 20
@@ -1467,24 +1463,41 @@ func (f *remoteFile) yieldDrainBytes() int64 {
 	return min(int64(maxYieldDrainBytes), max(int64(minYieldDrainBytes), int64(tput/4)))
 }
 
-// keepWarmOnYield ends an abandoned run's request, unless only a
-// short remainder is left: that is read to the end (and published), so the
-// connection goes back to the pool instead of being torn down mid-response.
-func (f *remoteFile) keepWarmOnYield(abandoned context.Context, finished <-chan struct{}, remaining *atomic.Int64, cancel context.CancelFunc) {
+// keepWarmOnYield aborts abandoned foreground ranges immediately. Background
+// drains retain their normal cap slot and are preemptible before any new
+// foreground request enters even the per-file admission queue.
+func (f *remoteFile) keepWarmOnYield(abandoned context.Context, finished <-chan struct{}, remaining *atomic.Int64, mode fetchMode, cancel context.CancelFunc) {
 	select {
 	case <-abandoned.Done():
 	case <-finished:
 		return
 	}
-	if rem := remaining.Load(); rem < 0 || rem > f.yieldDrainBytes() || f.ctx.Err() != nil {
+	if rem := remaining.Load(); mode == fetchUrgent || rem < 0 || rem > f.yieldDrainBytes() || f.ctx.Err() != nil {
 		cancel()
 		return
 	}
+	f.urgentMu.Lock()
+	sig := f.yieldSig
+	seeking := f.urgentWait > 0
+	f.urgentMu.Unlock()
+	if seeking {
+		cancel()
+		return
+	}
+	p, _ := f.payload()
+	release, ok := f.e.gate.tryDrain(dialAddr(p.URL), cancel)
+	if !ok {
+		cancel()
+		return
+	}
+	defer release()
 	t := time.NewTimer(yieldDrainWait)
 	defer t.Stop()
 	select {
 	case <-finished:
 	case <-t.C:
+		cancel()
+	case <-sig:
 		cancel()
 	case <-f.ctx.Done():
 		cancel()
@@ -1853,6 +1866,13 @@ func checkContentRange(v string, start, size int64) error {
 // byte has not arrived within the hedge delay, a duplicate request goes out
 // on a separate connection pool and the first to deliver a byte wins.
 func (e *Engine) get(ctx context.Context, u string, start, end int64, urgent bool, slots chan struct{}) (*http.Response, timing, error) {
+	// Preempt drains before waiting on either per-file or host admission.
+	// Holding this registration through header/first-byte acquisition also
+	// prevents a newly abandoned background range from starting a drain.
+	if gateUrgent(ctx) {
+		done := e.gate.beginForeground(dialAddr(u))
+		defer done()
+	}
 	// Count actual requests through body close, including probes and hedges.
 	// A speculative duplicate may only use a spare slot; it must never
 	// block the primary or exceed the provider's media connection budget.
@@ -2452,8 +2472,8 @@ func (s *httpSource) read(ctx context.Context, p []byte, off int64, mode fetchMo
 		}
 		s.mu.Unlock()
 		if seek {
-			// Cancellation may drain a nearly complete response within the
-			// existing bounds. Await its body close and slot release here,
+			// Retired foreground ranges abort and background drains yield.
+			// Await their body close and slot release here,
 			// before the new foreground GET enters host admission.
 			oldRuns.wait()
 			f.endUrgentSeek()

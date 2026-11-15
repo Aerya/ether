@@ -254,6 +254,9 @@ type hostGate struct {
 	mu      sync.Mutex
 	busy    map[string]int
 	waiters map[string][]*gateWaiter
+
+	foreground map[string]int
+	drains     map[string]map[*drainLease]struct{}
 }
 
 type gateWaiter struct {
@@ -264,6 +267,65 @@ type gateWaiter struct {
 
 func newHostGate(c *connCap) *hostGate {
 	return &hostGate{limit: c.current, now: func() time.Time { return c.now() }, busy: map[string]int{}, waiters: map[string][]*gateWaiter{}}
+}
+
+// A drain owns its connection normally, but may keep it only while no
+// foreground request is entering admission. Cancellation aborts the HTTP
+// body; neither the request gate nor the physical connection cap is bypassed.
+type drainLease struct{ cancel context.CancelFunc }
+
+func (g *hostGate) beginForeground(addr string) func() {
+	if g == nil {
+		return func() {}
+	}
+	g.mu.Lock()
+	if g.foreground == nil {
+		g.foreground = make(map[string]int)
+	}
+	g.foreground[addr]++
+	var cancel []context.CancelFunc
+	for d := range g.drains[addr] {
+		cancel = append(cancel, d.cancel)
+	}
+	g.mu.Unlock()
+	for _, stop := range cancel {
+		stop()
+	}
+	return func() {
+		g.mu.Lock()
+		g.foreground[addr]--
+		if g.foreground[addr] == 0 {
+			delete(g.foreground, addr)
+		}
+		g.mu.Unlock()
+	}
+}
+
+func (g *hostGate) tryDrain(addr string, cancel context.CancelFunc) (func(), bool) {
+	if g == nil {
+		return nil, false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.foreground[addr] > 0 {
+		return nil, false
+	}
+	if g.drains == nil {
+		g.drains = make(map[string]map[*drainLease]struct{})
+	}
+	if g.drains[addr] == nil {
+		g.drains[addr] = make(map[*drainLease]struct{})
+	}
+	d := &drainLease{cancel: cancel}
+	g.drains[addr][d] = struct{}{}
+	return func() {
+		g.mu.Lock()
+		delete(g.drains[addr], d)
+		if len(g.drains[addr]) == 0 {
+			delete(g.drains, addr)
+		}
+		g.mu.Unlock()
+	}, true
 }
 
 // acquire waits for a request slot to addr. urgent reports whether a viewer
