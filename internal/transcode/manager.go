@@ -833,10 +833,15 @@ func (m *Manager) startHLS(ctx context.Context, req core.HLSRequest, life *encod
 		}
 		measured, next, err := m.continuousCopyOrigin(ctx, runSpec{Input: req.InputURL, InputHeaders: inputHeaders, InputScopeHeaders: scope, Info: req.Info, Start: offset})
 		if err != nil {
-			return nil, err
+			// An inconclusive bounded probe must not prevent playback. Keep the
+			// requested clock and the ordinary demuxer/keyframe seek behavior;
+			// only a proven origin may enable the exact copy-origin seek path.
+			m.log.Debug("copy presentation origin unavailable; using requested start", "session", req.SessionID, "err", err)
+			copyOrigin = false
+		} else {
+			offset = measured
+			copyOpeningEnd = next
 		}
-		offset = measured
-		copyOpeningEnd = next
 	}
 
 	// HLS playlists start at the offset; a DASH MPD always spans the whole
