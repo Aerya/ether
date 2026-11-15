@@ -25,6 +25,12 @@ func (s *Service) AISearch(ctx context.Context, v *core.Viewer, d core.Device, q
 	return s.describeSearch(ctx, v, d, query, q, true)
 }
 
+// AISearchVisible uses the grid's batched local authorization path. A job's
+// cached wire cards must not trigger fifty Item detail enrichments on a poll.
+func (s *Service) AISearchVisible(ctx context.Context, v *core.Viewer, keys []core.RatingKey) ([]core.Title, error) {
+	return s.PageArtworkTitles(s.NoProviderWait(ctx), v, keys)
+}
+
 // DescriptiveSearch reads/schedules the shared job and returns immediately.
 func (s *Service) DescriptiveSearch(ctx context.Context, v *core.Viewer, d core.Device, query string, q frontend.ItemQuery) (frontend.SearchPage, error) {
 	return s.describeSearch(ctx, v, d, query, q, false)
@@ -47,11 +53,12 @@ func (s *Service) describeSearch(ctx context.Context, v *core.Viewer, _ core.Dev
 		return frontend.SearchPage{}, err
 	}
 	status := &frontend.DescriptiveSearchStatus{State: frontend.DescriptiveSearchState(result.State), RetryAfterSeconds: result.RetryAfterSeconds}
+	allowed, err := s.allowTitles(ctx, viewer, result.Items)
+	if err != nil {
+		return frontend.SearchPage{}, err
+	}
 	var items []core.Title
-	for _, title := range result.Items {
-		if !s.visible(ctx, viewer, &title) {
-			continue
-		}
+	for _, title := range allowed {
 		match, e := s.matchesUserQuery(ctx, viewer, title, q)
 		if e != nil {
 			return frontend.SearchPage{}, e

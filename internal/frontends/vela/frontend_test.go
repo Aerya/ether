@@ -33,6 +33,10 @@ type descriptiveFake struct {
 	state     frontend.DescriptiveSearchState
 }
 
+func (f *descriptiveFake) AISearchVisible(context.Context, *frontend.Viewer, []frontend.RatingKey) ([]frontend.Title, error) {
+	return nil, nil
+}
+
 func (f *descriptiveFake) AISearchAvailable() bool { return f.available }
 func (f *descriptiveFake) AISearch(context.Context, *frontend.Viewer, frontend.Device, string, frontend.ItemQuery) (frontend.SearchPage, error) {
 	return frontend.SearchPage{}, nil

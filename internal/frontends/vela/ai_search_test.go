@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +18,21 @@ type aiSearchFake struct {
 	frontendtest.Experience
 	available bool
 	refine    func(context.Context) (frontend.SearchPage, error)
+}
+
+func (f *aiSearchFake) AISearchVisible(ctx context.Context, v *frontend.Viewer, keys []frontend.RatingKey) ([]frontend.Title, error) {
+	var out []frontend.Title
+	for _, key := range keys {
+		detail, err := f.Item(ctx, frontend.ItemRequest{Viewer: v, Key: key})
+		if errors.Is(err, frontend.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, detail.Title)
+	}
+	return out, nil
 }
 
 func (f *aiSearchFake) AISearchAvailable() bool { return f.available }
@@ -36,6 +52,11 @@ func checkAISearch(t *testing.T) {
 	defer shutdown()
 	release := make(chan struct{})
 	source := &aiSearchFake{available: true}
+	var decorations atomic.Int32
+	source.UserDataFunc = func(context.Context, *frontend.Viewer, []frontend.RatingKey) (map[frontend.RatingKey]frontend.WatchStatus, error) {
+		decorations.Add(1)
+		return nil, nil
+	}
 	source.refine = func(ctx context.Context) (frontend.SearchPage, error) {
 		select {
 		case <-ctx.Done():
@@ -111,7 +132,10 @@ func checkAISearch(t *testing.T) {
 	}
 	close(release)
 	wait(id)
+	preparedDecorations := decorations.Load()
+	pollStarted := time.Now()
 	w = request(`{}`, id, "device", i.pollAISearch)
+	t.Logf("fake completed GET=%s", time.Since(pollStarted))
 	result := decode(w)
 	if w.Code != 200 || result["status"] != "complete" {
 		t.Fatal(w.Code, result)
@@ -119,6 +143,12 @@ func checkAISearch(t *testing.T) {
 	results := result["results"].(map[string]any)
 	if results["generation"] != float64(7) || len(results["items"].([]any)) != 1 || results["items"].([]any)[0].(map[string]any)["name"] != "Refined" {
 		t.Fatal(results)
+	}
+	pollStarted = time.Now()
+	cached := request(`{}`, id, "device", i.pollAISearch)
+	t.Logf("fake cached GET=%s", time.Since(pollStarted))
+	if cached.Code != 200 || decorations.Load() != preparedDecorations {
+		t.Fatalf("cached reads repeated result decoration: count=%d status=%d", decorations.Load(), cached.Code)
 	}
 	source.refine = func(context.Context) (frontend.SearchPage, error) {
 		return frontend.SearchPage{}, errors.New("secret provider failure")

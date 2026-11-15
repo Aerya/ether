@@ -18,6 +18,7 @@ type aiSearchJob struct {
 	id, scope, query, status string
 	generation               int
 	page                     frontend.SearchPage
+	titles                   []object
 	err                      error
 	cancel                   context.CancelFunc
 	expires                  time.Time
@@ -122,6 +123,13 @@ func (i *instance) startAISearch(w http.ResponseWriter, r *http.Request) {
 		j.status = "running"
 		i.aiMu.Unlock()
 		page, e := source.AISearch(ctx, v, d, j.query, frontend.ItemQuery{Limit: 50, NoTotal: true})
+		var titles []object
+		if e == nil && (page.Descriptive == nil || page.Descriptive.State == frontend.DescriptiveReady) {
+			page.Page.Items = append([]frontend.Title(nil), page.Page.Items[:min(50, len(page.Page.Items))]...)
+			// User state, ratings and artwork grants are assembled once by the
+			// job. GET only authorizes and filters these immutable cards.
+			titles, e = i.titles(r.WithContext(i.host.Experience.NoProviderWait(ctx)), v, token, page.Page.Items)
+		}
 		if e == nil {
 			e = ctx.Err()
 		}
@@ -141,7 +149,7 @@ func (i *instance) startAISearch(w http.ResponseWriter, r *http.Request) {
 			j.status = "failed"
 			return
 		}
-		page.Page.Items = append([]frontend.Title(nil), page.Page.Items[:min(50, len(page.Page.Items))]...)
+		j.titles = titles
 		j.page = page
 		j.status = "complete"
 	}()
@@ -209,7 +217,7 @@ func (i *instance) readAISearch(w http.ResponseWriter, r *http.Request, cancel b
 		j.cancel()
 	}
 	wire := aiJobWire(j)
-	page, query, generation := j.page, j.query, j.generation
+	page, query, generation, cachedTitles := j.page, j.query, j.generation, j.titles
 	i.aiMu.Unlock()
 	if !i.aiSearchAvailable() {
 		i.unavailable(w, r)
@@ -217,24 +225,26 @@ func (i *instance) readAISearch(w http.ResponseWriter, r *http.Request, cancel b
 	}
 	if wire["status"] == "complete" {
 		r = r.WithContext(i.host.Experience.NoProviderWait(r.Context()))
-		// Revalidate the bounded result prefix under today's viewer policy. Job
-		// creation is never a grant to keep reading a subsequently hidden title.
-		items := make([]frontend.Title, 0, len(page.Page.Items))
+		// Recheck today's policy in one local batch. Never rerun scoring,
+		// detail enrichment, user-data decoration or artwork signing here.
+		keys := make([]frontend.RatingKey, 0, len(page.Page.Items))
 		for _, title := range page.Page.Items {
-			detail, e := i.host.Experience.Item(r.Context(), frontend.ItemRequest{Viewer: v, Device: requestDevice(r), Key: title.Key})
-			if errors.Is(e, frontend.ErrNotFound) {
-				continue
-			}
-			if e != nil {
-				fail(w, e)
-				return
-			}
-			items = append(items, detail.Title)
+			keys = append(keys, title.Key)
 		}
-		titles, e := i.titles(r, v, token, items)
+		visible, e := i.host.Experience.(frontend.AISearcher).AISearchVisible(r.Context(), v, keys)
 		if e != nil {
 			fail(w, e)
 			return
+		}
+		allowed := make(map[frontend.RatingKey]bool, len(visible))
+		for _, title := range visible {
+			allowed[title.Key] = true
+		}
+		titles := make([]object, 0, len(cachedTitles))
+		for idx, title := range page.Page.Items {
+			if allowed[title.Key] {
+				titles = append(titles, cachedTitles[idx])
+			}
 		}
 		continuation := page.Continuation
 		if continuation == "" || continuation == frontend.ContinuationMore {

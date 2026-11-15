@@ -177,7 +177,15 @@ func (s *Service) describeSpec(ctx context.Context, key, query string) (*core.Co
 	s.describeMu.Unlock()
 	// Same generator, SpecGuide and parseDraft used by Describe a collection.
 	// Only local sources are useful in a search; no external discovery work.
-	spec, _, err := s.Generate(ctx, query+"\nFor this temporary search use the catalog source (or local TMDB person, keyword, studio or franchise sources when needed) and local genre, keyword, year, rating, votes, popularity, runtime, language, country or studio rules. Do not use external lists or per-viewer watch-state rules. Limit to 200 titles.", MediaMixed)
+	spec, _, err := s.generate(ctx, query, "", true)
+	if err == nil {
+		// Rules only: never log the request, model explanation or credentials.
+		log := s.log
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Debug("descriptive search rules", "media_type", spec.MediaType, "match", spec.Match, "rules", spec.Rules, "exclude", spec.Exclude)
+	}
 	s.describeMu.Lock()
 	draft.spec, draft.err, draft.at = spec, err, s.now()
 	close(draft.done)
@@ -190,15 +198,21 @@ func (s *Service) runDescribe(parent context.Context, user *core.User, key, quer
 	defer cancel()
 	started := time.Now()
 	stage := "draft"
+	var draftDuration, candidateDuration, scoringDuration time.Duration
 	spec, err := s.describeSpec(ctx, key, query)
+	draftDuration = time.Since(started)
 	result := core.DescriptiveResult{State: "failed"}
 	if err == nil {
 		stage = "candidates"
+		candidatesStarted := time.Now()
 		result.Items, err = s.cat.(core.DescriptiveCatalog).DescribeCandidates(core.WithCatalogViewer(core.WithExplicitSearch(ctx), user), *spec, 200)
+		candidateDuration = time.Since(candidatesStarted)
 		if err == nil {
 			result.State, result.Title = "ready", spec.Name
 			result.Spec = spec
-			// Reuse the viewer's existing taste model on the bounded candidate set.
+			// Taste only orders rule-matching candidates; it cannot add titles.
+			stage = "scoring"
+			scoringStarted := time.Now()
 			if sc := s.personalScorer(); sc != nil && user != nil && len(result.Items) > 1 {
 				if scores, e := sc.ScoreTitles(ctx, user, result.Items); e == nil {
 					slices.SortStableFunc(result.Items, func(a, b core.Title) int {
@@ -219,8 +233,14 @@ func (s *Service) runDescribe(parent context.Context, user *core.User, key, quer
 					})
 				}
 			}
+			scoringDuration = time.Since(scoringStarted)
 		}
 	}
+	log := s.log
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Debug("descriptive search timings", "draft_duration", draftDuration, "candidate_duration", candidateDuration, "scoring_duration", scoringDuration, "duration", time.Since(started), "candidates", len(result.Items))
 	if err == nil {
 		err = ctx.Err()
 	}

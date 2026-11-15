@@ -175,3 +175,91 @@ func TestDescriptiveSearch(t *testing.T) {
 	}
 
 }
+
+// Fake model fixture, not a live or recorded model response. Exercise the real Generate /
+// parseDraft / SQL candidate / taste path with conjunctive semantic constraints.
+type relevanceReply struct {
+	calls int
+	msgs  []llm.Message
+}
+
+func (*relevanceReply) Enabled() bool { return true }
+func (r *relevanceReply) Chat(_ context.Context, msgs []llm.Message, _ bool) (string, error) {
+	r.calls++
+	r.msgs = msgs
+	return "```json\n" + `{"spec":{"name":"A cozy night in","mediaType":"mixed","sources":[{"kind":"catalog"}],"match":"all","rules":[{"field":"genre","op":"in","value":["Comedy","Romance","Family"]},{"field":"keyword","op":"in","value":["friendship","romantic comedy"]}],"exclude":[{"field":"genre","op":"in","value":["Horror","Thriller","Crime","War"]}],"sort":"popularity","sortDesc":true,"limit":200}}` + "\n```", nil
+}
+
+type relevanceScorer struct {
+	calls int
+	seen  []core.Title
+}
+
+func (s *relevanceScorer) ScoreTitles(_ context.Context, _ *core.User, titles []core.Title) (map[core.RatingKey]float64, error) {
+	s.calls++
+	s.seen = append([]core.Title(nil), titles...)
+	// Even an arbitrarily high score for a nonmatching title cannot add it.
+	return map[core.RatingKey]float64{core.ShowKey(1): 1, core.MovieKey(2): 2, core.ShowKey(3): 1e9, core.MovieKey(4): 1e9, core.MovieKey(5): 1e9}, nil
+}
+
+func TestDescriptiveRelevance(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.OpenMemory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cat, err := catalog.New(db, nil, config.Catalog{Language: "en-US", Region: "US"}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtures := []core.Title{
+		{Key: core.ShowKey(1), Type: core.TypeShow, Title: "Gilmore Girls", Genres: []string{"Comedy", "Drama"}, Keywords: []string{"friendship"}, Popularity: 100},
+		{Key: core.MovieKey(2), Type: core.TypeMovie, Title: "Comfort rom-com", Genres: []string{"Romance", "Comedy"}, Keywords: []string{"romantic comedy"}, Popularity: 50},
+		{Key: core.ShowKey(3), Type: core.TypeShow, Title: "House", Genres: []string{"Drama", "Mystery"}, Keywords: []string{"friendship"}, Popularity: 1000},
+		{Key: core.MovieKey(4), Type: core.TypeMovie, Title: "Dark comedy", Genres: []string{"Comedy", "Horror"}, Keywords: []string{"friendship"}, Popularity: 1000},
+		{Key: core.MovieKey(5), Type: core.TypeMovie, Title: "Unrelated comedy", Genres: []string{"Comedy"}, Keywords: []string{"politics"}, Popularity: 1000},
+	}
+	for _, title := range fixtures {
+		title.IDs.TMDB = title.Key.TMDB()
+		title.ContentRating = "PG"
+		title.VoteCount = 100
+		title.Released = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+		if err := cat.UpsertTitle(ctx, title, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var logs bytes.Buffer
+	svc, err := collections.New(db, cat, slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, scorer := &relevanceReply{}, &relevanceScorer{}
+	svc.SetLLM(chat)
+	svc.SetScorer(scorer)
+	viewer := &core.User{ID: 7}
+	started := time.Now()
+	got, err := svc.DescribeSearch(ctx, viewer, "cozy cute girls night in", true)
+	cold := time.Since(started)
+	if err != nil || got.State != "ready" {
+		t.Fatalf("%+v: %v", got, err)
+	}
+	if len(got.Items) != 2 || got.Items[0].Key != core.MovieKey(2) || got.Items[1].Key != core.ShowKey(1) {
+		t.Fatalf("rules and taste: %+v", got.Items)
+	}
+	if len(scorer.seen) != 2 {
+		t.Fatalf("taste saw nonmatches: %+v", scorer.seen)
+	}
+	if !strings.Contains(chat.msgs[0].Content, collections.SpecGuide) || !strings.Contains(chat.msgs[0].Content, "mood") || !strings.Contains(chat.msgs[1].Content, "cozy cute girls night in") {
+		t.Fatal("temporary prompt must use the common guide and semantic instructions")
+	}
+	started = time.Now()
+	cached, err := svc.DescribeSearch(ctx, viewer, "  COZY cute girls night IN  ", true)
+	warm := time.Since(started)
+	if err != nil || len(cached.Items) != 2 || chat.calls != 1 || scorer.calls != 1 {
+		t.Fatalf("cache repeated work: model=%d scorer=%d err=%v", chat.calls, scorer.calls, err)
+	}
+	specJSON, _ := json.Marshal(got.Spec)
+	t.Logf("fake reply spec: %s", specJSON)
+	t.Logf("cold=%s cached=%s stages=%s", cold, warm, logs.String())
+}
