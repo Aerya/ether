@@ -102,6 +102,12 @@ func (s *surfaceExperience) PageCachedRatings(ctx context.Context, viewer *core.
 		if title.Type != core.TypeMovie && title.Type != core.TypeShow {
 			continue
 		}
+		// A single title is a detail open, which is real use: fetch missing
+		// badges in the background (bounded, deduplicated queue), as the Plex
+		// detail path does. Card pages stay cache-only.
+		if _, ok := cached[title.Key]; !ok && len(titles) == 1 && title.Key != 0 {
+			s.detail.ratings.Queue(title)
+		}
 		for _, b := range cached[title.Key] {
 			if b.Scale <= 0 || math.IsNaN(b.Value) || math.IsInf(b.Value, 0) || b.Value < 0 || b.Value > b.Scale {
 				continue
