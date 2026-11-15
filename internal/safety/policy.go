@@ -173,6 +173,17 @@ func (s *Service) Put(ctx context.Context, id int64, p Policy) error {
 	if id == 0 {
 		return fmt.Errorf("invalid viewer or bitrate")
 	}
+	if p.Bedtime != nil {
+		if p.Bedtime.WakeTime == "" {
+			p.Bedtime.WakeTime = "06:00"
+		}
+		if p.Bedtime.Timezone != "" {
+			p.Timezone = p.Bedtime.Timezone
+		} else {
+			p.Bedtime.Timezone = p.Timezone
+		}
+		p.AllowedHours = nil
+	}
 	if err := p.Validate(); err != nil {
 		return err
 	}
@@ -336,8 +347,8 @@ func (s *Service) CanPlay(u *core.User, remote bool, now time.Time) bool {
 	return CanPlayWithPolicy(u, s.ForUser(u), remote, now)
 }
 
-// CanPlayWithPolicy evaluates the same playback rules against an owned policy
-// snapshot. It does not establish freshness or an authorization interval.
+// CanPlayWithPolicy checks restrictions that also apply to a running item.
+// Time windows are checked only by ConfirmAdmission, so an item can finish.
 func CanPlayWithPolicy(u *core.User, p Policy, remote bool, now time.Time) bool {
 	if u == nil {
 		return false
@@ -345,23 +356,7 @@ func CanPlayWithPolicy(u *core.User, p Policy, remote bool, now time.Time) bool 
 	if remote && p.RemoteDisabled {
 		return false
 	}
-	if len(p.AllowedHours) == 0 {
-		return true
-	}
-	loc := time.UTC
-	if p.Timezone != "" {
-		var err error
-		loc, err = time.LoadLocation(p.Timezone)
-		if err != nil {
-			return false
-		}
-	}
-	for _, h := range p.AllowedHours {
-		if now.In(loc).Hour() == h {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
 // PolicyInTx reads the durable policy row. A missing row is unrestricted.
@@ -396,13 +391,16 @@ type Preset struct {
 
 func KidsPreset(age string) Preset {
 	rating := "PG"
+	bedtime := "20:00"
 	switch age {
 	case "preschool":
 		rating = "TV-Y"
+		bedtime = "19:00"
 	case "teens":
 		rating = "PG-13"
+		bedtime = "22:00"
 	}
-	return Preset{MaxContentRating: rating, Policy: Policy{BlockedKeywords: []string{"pornography", "erotic movie"}}}
+	return Preset{MaxContentRating: rating, Policy: Policy{Bedtime: &core.Bedtime{Time: bedtime, WakeTime: "06:00"}, BlockedKeywords: []string{"pornography", "erotic movie"}}}
 }
 func (s *Service) Handler() http.Handler {
 	m := http.NewServeMux()
@@ -495,7 +493,7 @@ func (s *Service) Restricted(u *core.User) bool {
 	}
 	p := s.ForUser(u)
 	share := s.shareFor(u)
-	return p.Bedtime != nil || u.MaxContentRating != "" || len(u.AllowedLibraries) > 0 || len(p.BlockedGenres) > 0 || len(p.BlockedKeywords) > 0 ||
+	return p.Bedtime != nil || len(p.AllowedHours) > 0 || u.MaxContentRating != "" || len(u.AllowedLibraries) > 0 || len(p.BlockedGenres) > 0 || len(p.BlockedKeywords) > 0 ||
 		share.FilterMovies != "" || share.FilterTelevision != ""
 }
 

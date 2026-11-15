@@ -669,6 +669,11 @@ func (s *Service) startIPTVSession(ctx context.Context, ss *session) error {
 }
 
 func writeStreamError(w http.ResponseWriter, err error) {
+	var bedtime *core.ErrBedtime
+	if errors.As(err, &bedtime) {
+		http.Error(w, bedtime.Error(), http.StatusForbidden)
+		return
+	}
 	code := http.StatusBadGateway
 	switch err {
 	case core.ErrNotFound:

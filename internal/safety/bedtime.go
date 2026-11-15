@@ -128,9 +128,63 @@ func bedtimeInstant(date time.Time, minute int, loc *time.Location) time.Time {
 	return t
 }
 func CheckBedtime(u *core.User, p Policy, now time.Time) error {
-	state := BedtimeStatus(u, p.Bedtime, now)
+	state := PlaybackTimeState(u, p, now)
 	if state.Active {
 		return &core.ErrBedtime{NextAllowedAt: *state.NextAllowedAt}
 	}
 	return nil
+}
+
+// PlaybackTimeState evaluates the single allowed-times policy. Old disjoint
+// hourly schedules remain exact until the owner replaces them with bedtime.
+func PlaybackTimeState(u *core.User, p Policy, now time.Time) core.BedtimeState {
+	if u == nil || u.IsOwner {
+		return core.BedtimeState{}
+	}
+	if p.Bedtime != nil {
+		b := *p.Bedtime
+		if b.Timezone == "" {
+			b.Timezone = p.Timezone
+		}
+		return BedtimeStatus(u, &b, now)
+	}
+	if len(p.AllowedHours) == 0 {
+		return core.BedtimeState{}
+	}
+	loc := time.Local
+	// Legacy empty timezone historically meant UTC; preserve it on upgrade.
+	if p.Timezone == "" {
+		loc = time.UTC
+	} else {
+		var err error
+		loc, err = time.LoadLocation(p.Timezone)
+		if err != nil {
+			return core.BedtimeState{}
+		}
+	}
+	allowed := func(at time.Time) bool {
+		h := at.In(loc).Hour()
+		for _, v := range p.AllowedHours {
+			if h == v {
+				return true
+			}
+		}
+		return false
+	}
+	current := allowed(now)
+	state := core.BedtimeState{Active: !current}
+	// A local day can have 25 hours. Minute stepping also handles half-hour
+	// DST transitions and repeated hours without ambiguous local arithmetic.
+	for at := now.Truncate(time.Minute).Add(time.Minute); at.Before(now.Add(27 * time.Hour)); at = at.Add(time.Minute) {
+		if allowed(at) != current {
+			v := at.UTC()
+			if current {
+				state.StartsAt = &v
+			} else {
+				state.NextAllowedAt = &v
+			}
+			break
+		}
+	}
+	return state
 }
