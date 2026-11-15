@@ -17,6 +17,28 @@ func viewerWire(v *frontend.Viewer) object {
 	// The viewer value includes current policy; revisions change when those facts do.
 	return object{"id": id, "name": v.Username, "policyRevision": hashJSON(v)}
 }
+
+// viewerPolicyWire reads the current owner policy for a bootstrap or sign-in.
+// Countdown instants come from the same evaluator as playback admission.
+func (i *instance) viewerPolicyWire(r *http.Request, v *frontend.Viewer, d frontend.Device) (object, error) {
+	out := viewerWire(v)
+	if i.host.ViewerCapabilities == nil {
+		return out, nil
+	}
+	ip, _ := frontend.ClientIP(i.identityContext(r))
+	info, err := i.host.ViewerCapabilities(r.Context(), v, d, ip)
+	if err != nil {
+		return nil, err
+	}
+	if info.Bedtime != nil {
+		out["bedtime"] = info.Bedtime
+	}
+	if info.BedtimeState != nil {
+		out["bedtimeState"] = info.BedtimeState
+	}
+	out["policyRevision"] = hashJSON(object{"viewer": v, "policy": info.PolicyRevision, "bedtime": info.Bedtime})
+	return out, nil
+}
 func (i *instance) tokens(w http.ResponseWriter, r *http.Request, access, refresh string, d frontend.Device) {
 	resolver, ok := i.host.Identity.(frontend.DeviceIdentity)
 	if !ok {

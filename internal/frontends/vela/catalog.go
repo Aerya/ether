@@ -356,7 +356,11 @@ func (i *instance) buildBootstrap(r *http.Request, v *frontend.Viewer, t string,
 			heroes, shelves = heroesFromRows(append(rows, fill...), sources)
 		}
 	}
-	out := object{"viewer": viewerWire(v), "capabilities": i.requestCapabilities(r), "defaultSkinId": "default", "rows": shelves}
+	viewer, err := i.viewerPolicyWire(r, v, requestDevice(r))
+	if err != nil {
+		return nil, err
+	}
+	out := object{"viewer": viewer, "capabilities": i.requestCapabilities(r), "defaultSkinId": "default", "rows": shelves}
 	if len(heroes) > 0 {
 		ids := make([]string, 0, len(heroes))
 		for _, hero := range heroes {
